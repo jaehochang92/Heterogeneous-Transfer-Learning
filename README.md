@@ -1,2 +1,2 @@
-# Heterogeneous-Transfer-Learning for High-dimensional Regression with Feature Mismatch
+# Heterogeneous Transfer Learning for High-dimensional Regression with Feature Mismatch
 This repository provides simulation and data example codes for the paper https://arxiv.org/abs/2412.18081
