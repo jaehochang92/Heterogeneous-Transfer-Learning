@@ -1,109 +1,95 @@
 library(curatedOvarianData)
-library(limma) ## needed for matrix manipulation
 library(glmnet)
 
-
-##  load targer and proxy data (98 target 26 proxy)
+## load target and proxy data
 data(GSE9891_eset)
 data(GSE26712_eset)
-
 target_eset = t(as.matrix(GSE9891_eset))
 proxy_eset = t(as.matrix(GSE26712_eset))
 
-## select subjects id
-id_sel_target = which(GSE9891_eset@phenoData$vital_status =='deceased')
-id_sel_proxy = which(GSE26712_eset@phenoData$vital_status  =='deceased')
+## select subject ids
+target_deceased_ids = which(GSE9891_eset@phenoData$vital_status == "deceased")
+proxy_deceased_ids = which(GSE26712_eset@phenoData$vital_status == "deceased")
 
-target_variables = read.csv("results/target_var.csv")[,2]
-proxy_variables  = read.csv("results/proxy_var.csv")[,2]
+target_variables = read.csv("results/target_var.csv")[, 2]
+proxy_variables = read.csv("results/proxy_var.csv")[, 2]
 
-X_target = target_eset[id_sel_target, which(colnames(target_eset) %in% target_variables)]
-y_target = log(GSE9891_eset@phenoData$days_to_death[id_sel_target])
+x_target = target_eset[target_deceased_ids, which(colnames(target_eset) %in% target_variables)]
+y_target = log(GSE9891_eset@phenoData$days_to_death[target_deceased_ids])
+x_proxy = proxy_eset[proxy_deceased_ids, which(colnames(proxy_eset) %in% proxy_variables)]
+y_proxy = log(GSE26712_eset@phenoData$days_to_death[proxy_deceased_ids])
 
-X_proxy = proxy_eset[id_sel_proxy, which(colnames(proxy_eset) %in% proxy_variables)]
-y_proxy = log(GSE26712_eset@phenoData$days_to_death[id_sel_proxy])
+## align shared and proxy-only variables
+common_proxy_idx = which(colnames(x_proxy) %in% colnames(x_target))
+x_proxy = x_proxy[, c(common_proxy_idx, setdiff(seq_len(ncol(x_proxy)), common_proxy_idx))]
+n_common = length(common_proxy_idx)
 
-## order proxy varible so that the first 69 variables are the commons one
-ord_var = which(colnames(X_proxy) %in% colnames(X_target))
-X_proxy = X_proxy[,c(ord_var,setdiff(1:NCOL(X_proxy),ord_var))]
-
-## rergression on proxy data (one time)
-## we use ridge regression for this step since p>n
-proxy_ridge_cv = cv.glmnet(X_proxy, y_proxy, alpha = 0, intercept = FALSE)
+## regression on proxy data (one time)
+proxy_ridge_cv = cv.glmnet(x_proxy, y_proxy, alpha = 0, intercept = FALSE)
 proxy_beta = coef(proxy_ridge_cv, s = proxy_ridge_cv$lambda.min)[-1, 1]
+proxy_x2_on_x1_coef = coef(lm(x_proxy[, -(1:n_common), drop = FALSE] ~ x_proxy[, 1:n_common, drop = FALSE] - 1))
 
-proxyX2X1 = coef(lm(X_proxy[,-c(1:69)]~X_proxy[,1:69] -1))
+## BASTANI estimator
+proxy_ridge_cv_bastani = cv.glmnet(x_proxy[, 1:n_common, drop = FALSE], y_proxy, alpha = 0, intercept = FALSE)
+proxy_beta_bastani = coef(proxy_ridge_cv_bastani, s = proxy_ridge_cv_bastani$lambda.min)[-1, 1]
 
-## BASTANI ESTIMATOR
-proxy_ridge_cv_bastani = cv.glmnet(X_proxy[,1:69],y_proxy, alpha = 0,intercept=FALSE)
-proxy_beta_bastani = coef(proxy_ridge_cv_bastani, s = proxy_ridge_cv_bastani$lambda.min)[-1,1]
-
-
-## create 200 bootstrap datasets and estimate coefficients 
+## create bootstrap datasets and estimate coefficients
 set.seed(2175)
-OLS = LASSO = BASTANI = TL = TL.sv = matrix(NA, 200, 69)
-emap <- readRDS('results/emap.rds')
-M <- nrow(emap)
-for(b in 1:200) {
-  b_id = sample(1:NROW(X_target), replace = TRUE)
-  
+n_boot = 200
+lasso_coef_mat = bastani_coef_mat = htl_linear_coef_mat = htl_sieve_coef_mat = matrix(NA_real_, n_boot, n_common)
+emap = readRDS("results/emap.rds")
+sieve_basis_n = nrow(emap)
+
+for (boot_iter in seq_len(n_boot)) {
+  boot_ids = sample(seq_len(nrow(x_target)), replace = TRUE)
+  x_boot = x_target[boot_ids, , drop = FALSE]
+  y_boot = y_target[boot_ids]
+
   ## LASSO
-  lasso_cv = cv.glmnet(X_target[b_id, ], y_target[b_id])
-  lasso = coef(lasso_cv, s = 'lambda.min')[-1, 1]
-  
+  lasso_cv = cv.glmnet(x_boot, y_boot, alpha = 1)
+  lasso_coef = coef(lasso_cv, s = "lambda.min")[-1, 1]
+
   ## Bastani
-  b_newYt = y_target[b_id] -  X_target[b_id, ] %*% proxy_beta_bastani
-  blasso = cv.glmnet(X_target[b_id, ], b_newYt, alpha = 1)
-  hdelta = coef(blasso, s = 'lambda.min')[, 1]
-  bastani = hdelta[-1] + proxy_beta_bastani
-  
-  ## HTL w/ linear map
-  b_X_imputed = X_target[b_id, ]  %*% proxyX2X1
-  b_newYt = y_target[b_id] -  cbind(X_target[b_id, ], b_X_imputed) %*%  proxy_beta
-  
-  tl_lasso = cv.glmnet(cbind(X_target[b_id, ], b_X_imputed), y_target[b_id], alpha = 1)
-  tl_hdelta = coef(tl_lasso, s = 'lambda.min')[, 1]
-  
-  TL_coef = tl_hdelta[-1] + proxy_beta
-  TL_coef = TL_coef[1:69]
-  
-  ## HTL w/ sieve
-  sv_target <- sieve_preprocess(X_target[b_id, ], M)
-  b_X_imputed = sv_target$Phi %*% emap
-  b_newYt = y_target[b_id] - cbind(X_target[b_id, ], b_X_imputed) %*% proxy_beta
-  
-  tl_lasso = cv.glmnet(cbind(X_target[b_id, ], b_X_imputed), y_target[b_id], alpha = 1)
-  tl_hdelta = coef(tl_lasso, s = 'lambda.min')[, 1]
-  
-  TL.sv_coef = tl_hdelta[-1] + proxy_beta
-  TL.sv_coef = TL.sv_coef[1:69]
-  
+  new_y_bastani = y_boot - x_boot %*% proxy_beta_bastani
+  bastani_lasso = cv.glmnet(x_boot, new_y_bastani, alpha = 1)
+  delta_bastani = coef(bastani_lasso, s = "lambda.min")[-1, 1]
+  bastani_coef = delta_bastani + proxy_beta_bastani
+
+  ## HTL with linear map
+  x_imputed_linear = x_boot %*% proxy_x2_on_x1_coef
+  new_y_linear = y_boot - cbind(x_boot, x_imputed_linear) %*% proxy_beta
+  htl_linear_lasso = cv.glmnet(cbind(x_boot, x_imputed_linear), new_y_linear, alpha = 1)
+  htl_linear_coef = (coef(htl_linear_lasso, s = "lambda.min")[-1, 1] + proxy_beta)[1:n_common]
+
+  ## HTL with sieve
+  sieve_target = sieve_preprocess(x_boot, sieve_basis_n)
+  x_imputed_sieve = sieve_target$Phi %*% emap
+  new_y_sieve = y_boot - cbind(x_boot, x_imputed_sieve) %*% proxy_beta
+  htl_sieve_lasso = cv.glmnet(cbind(x_boot, x_imputed_sieve), new_y_sieve, alpha = 1)
+  htl_sieve_coef = (coef(htl_sieve_lasso, s = "lambda.min")[-1, 1] + proxy_beta)[1:n_common]
+
   ## save results
-  OLS[b, ]  = ols
-  LASSO[b, ] = lasso
-  BASTANI[b, ] = bastani
-  TL[b, ] = TL_coef
-  TL.sv[b, ] = TL.sv_coef
+  lasso_coef_mat[boot_iter, ] = lasso_coef
+  bastani_coef_mat[boot_iter, ] = bastani_coef
+  htl_linear_coef_mat[boot_iter, ] = htl_linear_coef
+  htl_sieve_coef_mat[boot_iter, ] = htl_sieve_coef
 }
 
 pdf("bootstrap.pdf")
-mar.default <- c(5, 4, 4, 2)
-par(mfrow = c(2, 3), mar =  mar.default + c(3, 0, 0, 0))
-for (d in 1:6) {
+mar_default = c(5, 4, 4, 2)
+par(mfrow = c(2, 3), mar = mar_default + c(3, 0, 0, 0))
+for (plot_idx in 1:6) {
   boxplot(
-    TL.sv[, d],
-    TL[, d],
-    BASTANI[, d],
-    LASSO[, d],
-    names = c('Htg.TL.sieve', 'Htg.TL.linear', 'Hmg.TL', 'Lasso'),
-    main = colnames(X_target)[d],
+    htl_sieve_coef_mat[, plot_idx],
+    htl_linear_coef_mat[, plot_idx],
+    bastani_coef_mat[, plot_idx],
+    lasso_coef_mat[, plot_idx],
+    names = c("Htg.TL.sieve", "Htg.TL.linear", "Hmg.TL", "Lasso"),
+    main = colnames(x_target)[plot_idx],
     cex.lab = 1.2,
-    boxwex = .3,
-    xaxt = 'n'
+    boxwex = 0.3,
+    xaxt = "n"
   )
-  axis(1,
-       1:4,
-       c('Htg.TL.sieve', 'Htg.TL.linear', 'Hmg.TL', 'Lasso'),
-       las = 2)
+  axis(1, 1:4, c("Htg.TL.sieve", "Htg.TL.linear", "Hmg.TL", "Lasso"), las = 2)
 }
 dev.off()

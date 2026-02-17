@@ -1,160 +1,136 @@
-## Modified the codes from:
+## Modified from:
 ## https://github.com/terrytianyuzhang/Sieve/blob/master/R/cv_sieve_need_to_include.R
-## For sieve estimation with cross-validation
+## Zhang, T., & Simon, N. (2023). Regression in tensor product spaces by the method of sieves. Electronic journal of statistics, 17(2), 3660.
+
 
 library(data.table)
 library(Sieve)
 
-index_spliter <- function(array, n_folds = 5) {
-  # array <- 1:99
-  
-  # Calculate the length of each part
-  part_length <- length(array) %/% n_folds
-  
-  # Create an empty list to store the parts
-  parts <- vector("list", n_folds)
-  
-  # Randomly shuffle the array
-  shuffled_array <- sample(array)
-  
-  # Split the shuffled array into parts
-  for (fold_index in 1:n_folds) {
-    start_index <- (fold_index - 1) * part_length + 1
-    if (fold_index < n_folds) {
-      end_index <- fold_index * part_length
-    } else{
-      end_index <- length(array)
-    }
-    parts[[fold_index]] <- shuffled_array[start_index:end_index]
+index_splitter <- function(index_array, n_folds = 5) {
+  part_length = length(index_array) %/% n_folds
+  fold_parts = vector("list", n_folds)
+  shuffled_index = sample(index_array)
+  for (fold_idx in seq_len(n_folds)) {
+    start_idx = (fold_idx - 1) * part_length + 1
+    end_idx = if (fold_idx < n_folds) fold_idx * part_length else length(index_array)
+    fold_parts[[fold_idx]] = shuffled_index[start_idx:end_idx]
   }
-  return(parts)
+  fold_parts
 }
 
-cross_validated_sieve <- function(AllData,
-                                  basis_numbers = NULL,
-                                  n_folds = 5,
-                                  type = 'cosine') {
-  xdim <- ncol(AllData) - 1
+cross_validated_sieve <- function(all_data, basis_numbers = NULL, n_folds = 5, type = "cosine") {
+  p <- ncol(all_data) - 1
   if (is.null(basis_numbers)) {
     basis_numbers = ceiling(c(
-      ncol(AllData) * c(5, nrow(AllData) ^ (1 / 5), nrow(AllData) ^ (1 / 3)),
-      ncol(AllData) ^ 2 * c(5, nrow(AllData) ^ (1 /
-                                                  5), nrow(AllData) ^ (1 / 3))
+      p * c(5, nrow(all_data)^(1 / 5), nrow(all_data)^(1 / 3))
+      # , p^2 * c(5, nrow(all_data)^(1 / 5), nrow(all_data)^(1 / 3))
     ))
   }
-  
-  validation_split_index <- index_spliter(1:nrow(AllData),
-                                          n_folds = n_folds)
-  parameter_tuning_reference <- data.frame()
-  for (basisN in basis_numbers) {
-    # print(paste0("trying basis number = ", basisN))
-    sieve_fitting_lambda <- NULL
-    for (split_index in 1:n_folds) {
-      TrainData <- AllData[-validation_split_index[[split_index]],]
-      ValidationData <-
-        AllData[validation_split_index[[split_index]],]
-      
-      
-      sieve.model <- sieve_preprocess(X = TrainData[, 2:(xdim + 1)],
-                                      basisN = basisN,
-                                      type = type)
-      sieve.fit <- sieve_solver(model = sieve.model,
-                                Y = TrainData$Y,
-                                lambda = sieve_fitting_lambda)
-      sieve_fitting_lambda <- sieve.fit$lambda # determined by glmnet
-      
-      sieve.validation <- sieve_predict(
-        model = sieve.fit, testX = ValidationData[, 2:(xdim + 1)], 
-        testY = ValidationData$Y
+
+  validation_split_idx = index_splitter(seq_len(nrow(all_data)), n_folds = n_folds)
+  tuning_rows = data.frame()
+
+  for (basis_n in basis_numbers) {
+    sieve_fitting_lambda = NULL
+    for (split_idx in seq_len(n_folds)) {
+      train_data = all_data[-validation_split_idx[[split_idx]], ]
+      validation_data = all_data[validation_split_idx[[split_idx]], ]
+
+      sieve_model = sieve_preprocess(X = train_data[, 2:(p + 1)], basisN = basis_n, type = type)
+      sieve_fit = sieve_solver(model = sieve_model, Y = train_data$Y, lambda = sieve_fitting_lambda)
+      sieve_fitting_lambda = sieve_fit$lambda
+
+      sieve_validation = sieve_predict(
+        model = sieve_fit,
+        testX = validation_data[, 2:(p + 1)],
+        testY = validation_data$Y
       )
-      
-      parameter_tuning_reference <-
-        rbind(
-          parameter_tuning_reference,
-          data.frame(
-            l1_penalty = sieve.fit$lambda,
-            l1_penalty_index = 1:length(sieve.fit$lambda),
-            basisN = rep(basisN, length(sieve.fit$lambda)),
-            validation_MSE = sieve.validation$MSE,
-            split_index = rep(split_index, length(sieve.fit$lambda))
-          )
+
+      tuning_rows = rbind(
+        tuning_rows,
+        data.frame(
+          l1_penalty = sieve_fit$lambda,
+          l1_penalty_index = seq_along(sieve_fit$lambda),
+          basis_n = rep(basis_n, length(sieve_fit$lambda)),
+          validation_mse = sieve_validation$MSE,
+          split_idx = rep(split_idx, length(sieve_fit$lambda))
         )
-      
+      )
     }
   }
-  parameter_tuning_reference <-
-    data.table(parameter_tuning_reference)
-  average_data <-
-    parameter_tuning_reference[, .(average_MSE = mean(validation_MSE),
-                                   l1_penalty = mean(l1_penalty)), 
-                               # there are some round-off error when I combine between the folds
-                               by = .(l1_penalty_index, basisN)]
-  
-  best_combination_index <- which.min(average_data$average_MSE)
-  best_lambda <- average_data$l1_penalty[best_combination_index]
-  best_basis_number <- average_data$basisN[best_combination_index]
-  return(list(best_lambda = best_lambda,
-              best_basis_number = best_basis_number))
+
+  tuning_dt = data.table::data.table(tuning_rows)
+  average_dt = tuning_dt[, .(
+    average_mse = mean(validation_mse),
+    l1_penalty = mean(l1_penalty)
+  ), by = .(l1_penalty_index, basis_n)]
+
+  best_idx = which.min(average_dt$average_mse)
+  list(
+    best_lambda = average_dt$l1_penalty[best_idx],
+    best_basis_number = average_dt$basis_n[best_idx]
+  )
 }
 
-jae_sv_cv <- function(AllData, type, n_folds) {
-  xdim <- ncol(AllData) - 1 # first column is y
-  basis_numbers <-
-    ceiling(c(
-      ncol(AllData) * c(2, 4)
-      # ncol(AllData) * c(5, nrow(AllData) ^ (1 / 5), nrow(AllData) ^ (1 / 3))
-      # , ncol(AllData) ^ 2 * c(5, nrow(AllData) ^ (1 / 5), nrow(AllData) ^ (1 / 3))
-    ))
-  
-  best_hyperparameter <- cross_validated_sieve(AllData, n_folds,
-                                               basis_numbers = basis_numbers)
-  # print('sieve-CV done.')
-  sieve.model <- sieve_preprocess(X = AllData[, 2:(xdim + 1)],
-                                  basisN = best_hyperparameter$best_basis_number,
-                                  type = type)
-  sieve.fit <- sieve_solver(model = sieve.model,
-                            Y = AllData$Y,
-                            lambda = best_hyperparameter$best_lambda)
-  return(list(M = best_hyperparameter, sieve.fit = sieve.fit))
+fit_sieve_with_cv <- function(all_data, type = "cosine", n_folds = 5) {
+  p = ncol(all_data) - 1 # first column is y
+  basis_numbers <- NULL
+  best_hyperparameter = cross_validated_sieve(
+    all_data = all_data,
+    basis_numbers = basis_numbers,
+    n_folds = n_folds,
+    type = type
+  )
+  sieve_model = sieve_preprocess(
+    X = all_data[, 2:(p + 1)],
+    basisN = best_hyperparameter$best_basis_number,
+    type = type
+  )
+  sieve_fit = sieve_solver(
+    model = sieve_model,
+    Y = all_data$Y,
+    lambda = best_hyperparameter$best_lambda
+  )
+  list(hyperparameter = best_hyperparameter, sieve_fit = sieve_fit)
 }
 
-
-# Example-CuratedOvarianCancer --------------------------------------------
-
-
-
-cbind_pad0 <- function(x, newcol) {
-  # If x is NULL, initialize as a matrix with zero rows
-  if (is.null(x)) {
-    return(matrix(newcol, ncol = 1))
+# x_proxy: n x p matrix. First p1 features are common in proxy and target domains; remaining p2 are proxy-only.
+cv_fitH_from_prxy <- function(x_proxy, p1, type = "linear", n_folds = 5, n_cores = 1) {
+  p2 <- ncol(x_proxy) - p1
+  if (p2 <= 0) stop("x_proxy must contain proxy-only columns beyond p1.")
+  x_common = x_proxy[, 1:p1, drop = FALSE]
+  x_proxy_only = x_proxy[, (p1 + 1):(p1 + p2), drop = FALSE]
+  coef_list = vector("list", p2)
+  if (type == 'sieve') {
+    fit_one_proxy_col <- function(p2id) {
+      df = data.frame(Y = x_proxy_only[, p2id], x_common, check.names = FALSE)
+      sieve_cv_fit = fit_sieve_with_cv(df, type = 'cosine', n_folds = n_folds)
+      as.numeric(sieve_cv_fit$sieve_fit$beta_hat)
+    }
+    if (.Platform$OS.type == "unix" && n_cores > 1) {
+      if (requireNamespace("pbmcapply", quietly = TRUE)) {
+        coef_list = pbmcapply::pbmclapply(
+          seq_len(p2),
+          fit_one_proxy_col,
+          mc.cores = n_cores
+        )
+      } else {
+        message("Install 'pbmcapply' to show a parallel progress bar: install.packages('pbmcapply')")
+        coef_list = parallel::mclapply(seq_len(p2), fit_one_proxy_col, mc.cores = n_cores)
+      }
+    } else {
+      coef_list = lapply(seq_len(p2), fit_one_proxy_col)
+    }
+    max_len = max(lengths(coef_list))
+    emap = matrix(0, nrow = max_len, ncol = p2)
+    for (p2id in seq_along(coef_list)) {
+      coef_vec = coef_list[[p2id]]
+      emap[seq_along(coef_vec), p2id] = coef_vec
+    }
+    colnames(emap) = colnames(x_proxy_only)
+  } else if (type == 'linear') {
+    lm_fit <- lm(x_proxy_only ~ x_common - 1)
+    emap <- coef(lm_fit)
   }
-  # Ensure x is a matrix
-  x <- as.matrix(x)
-  newcol <- as.vector(newcol)
-  # Determine target length
-  n_old <- nrow(x)
-  n_new <- length(newcol)
-  n_max <- max(n_old, n_new)
-  # Pad x if needed
-  if (n_old < n_max) {
-    x <- rbind(x, matrix(0, n_max - n_old, ncol(x)))
-  }
-  # Pad newcol if needed
-  if (n_new < n_max) {
-    newcol <- c(newcol, rep(0, n_max - n_new))
-  }
-  # Combine
-  cbind(x, newcol)
+  emap
 }
-
-
-emap <- NULL
-J <- ncol(X_proxy) - 69
-for (j in 1:J) {
-  df <- cbind(Y = X_proxy[, -c(1:69)][, j], X_proxy[, 1:69])
-  df <- as.data.frame(df)
-  jae.sv.fit <- jae_sv_cv(df, type, n_folds)
-  jae.sv.coef <- matrix(jae.sv.fit$sieve.fit$beta_hat, ncol = 1)
-  emap <- cbind_pad0(emap, jae.sv.coef)
-}
-emap
