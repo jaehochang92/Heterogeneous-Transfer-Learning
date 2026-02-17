@@ -1,0 +1,48 @@
+# OS
+.DS_Store
+
+# R session/history
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+*.RData
+*.rdata
+*.Rds
+*.rds
+
+# Generated plots and documents
+*.pdf
+*.eps
+*.png
+*.jpg
+*.jpeg
+*.tiff
+
+# Archives and binary blobs
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.gz
+*.bz2
+*.xz
+
+# Common model/checkpoint outputs
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.h5
+*.hdf5
+
+# Local environments / caches
+.Rproj.user/
+.renv/
+renv/library/
+renv/staging/
+renv/python/
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
