@@ -18,119 +18,122 @@ index_splitter <- function(index_array, n_folds = 5) {
   fold_parts
 }
 
-cross_validated_sieve <- function(all_data, basis_numbers = NULL, n_folds = 5, type = "cosine") {
-  p <- ncol(all_data) - 1
+sieve_solver <- function (model, Y, l1 = TRUE, family = "gaussian", lambda = NULL){
+  if (l1 == FALSE) {
+    Phi <- model$Phi
+    beta_hat <- least_square_C(Phi, Y)
+    model$beta_hat <- beta_hat
+  } else {
+    glmnet.fit <- glmnet(model$Phi[, -1], Y, family = family, alpha = 1, 
+                         lambda = lambda, intercept = TRUE, standardize = FALSE)
+    model$lambda <- glmnet.fit$lambda
+    model$beta_hat <- coef(glmnet.fit)
+    model$family <- family
+  }
+  return(model)
+}
+
+cross_validated_sieve <- function(X, Y, basis_numbers = NULL, n_folds = 5, type = "cosine") {
+  p <- ncol(X)
+  n_sample <- nrow(X)
   if (is.null(basis_numbers)) {
     basis_numbers = ceiling(c(
-      p * c(5, nrow(all_data)^(1 / 5), nrow(all_data)^(1 / 3))
-      # , p^2 * c(5, nrow(all_data)^(1 / 5), nrow(all_data)^(1 / 3))
+      p * c(5, n_sample^(1 / 5), n_sample^(1 / 3))
+      , p^2 * c(5, n_sample^(1 / 5), n_sample^(1 / 3))
     ))
   }
 
-  validation_split_idx = index_splitter(seq_len(nrow(all_data)), n_folds = n_folds)
-  tuning_rows = data.frame()
-
+  validation_split_idx = index_splitter(seq_len(n_sample), n_folds = n_folds)
+  total_iterations = length(basis_numbers) * n_folds
+  tuning_rows_list = vector("list", total_iterations)
+  list_idx <- 1
   for (basis_n in basis_numbers) {
-    sieve_fitting_lambda = NULL
+    global_model = sieve_preprocess(X, basis_n, type = type)
+    global_fit = sieve_solver(global_model, Y, lambda = NULL)
+    global_lambda = global_fit$lambda
     for (split_idx in seq_len(n_folds)) {
-      train_data = all_data[-validation_split_idx[[split_idx]], ]
-      validation_data = all_data[validation_split_idx[[split_idx]], ]
-
-      sieve_model = sieve_preprocess(X = train_data[, 2:(p + 1)], basisN = basis_n, type = type)
-      sieve_fit = sieve_solver(model = sieve_model, Y = train_data$Y, lambda = sieve_fitting_lambda)
-      sieve_fitting_lambda = sieve_fit$lambda
-
+      train_X = X[-validation_split_idx[[split_idx]], , drop = FALSE]
+      train_Y = Y[-validation_split_idx[[split_idx]]]
+      validation_X = X[validation_split_idx[[split_idx]], , drop = FALSE]
+      validation_Y = Y[validation_split_idx[[split_idx]]]
+      sieve_model = sieve_preprocess(train_X, basisN = basis_n, type = type)
+      sieve_fit = sieve_solver(sieve_model, train_Y, lambda = global_lambda)
       sieve_validation = sieve_predict(
         model = sieve_fit,
-        testX = validation_data[, 2:(p + 1)],
-        testY = validation_data$Y
+        testX = validation_X,
+        testY = validation_Y
       )
-
-      tuning_rows = rbind(
-        tuning_rows,
-        data.frame(
-          l1_penalty = sieve_fit$lambda,
-          l1_penalty_index = seq_along(sieve_fit$lambda),
-          basis_n = rep(basis_n, length(sieve_fit$lambda)),
-          validation_mse = sieve_validation$MSE,
-          split_idx = rep(split_idx, length(sieve_fit$lambda))
-        )
+      tuning_rows_list[[list_idx]] = data.table::data.table(
+        l1_penalty = sieve_fit$lambda,
+        l1_penalty_index = seq_along(sieve_fit$lambda),
+        basis_n = rep(basis_n, length(sieve_fit$lambda)),
+        validation_mse = sieve_validation$MSE,
+        split_idx = rep(split_idx, length(sieve_fit$lambda))
       )
+      list_idx <- list_idx + 1
     }
   }
-
-  tuning_dt = data.table::data.table(tuning_rows)
-  average_dt = tuning_dt[, .(
-    average_mse = mean(validation_mse),
-    l1_penalty = mean(l1_penalty)
-  ), by = .(l1_penalty_index, basis_n)]
+  
+  tuning_dt = data.table::rbindlist(tuning_rows_list)
+  average_dt = tuning_dt[, .(average_mse = mean(validation_mse),
+                             l1_penalty = mean(l1_penalty)), 
+                         by = .(l1_penalty_index, basis_n)]
 
   best_idx = which.min(average_dt$average_mse)
-  list(
-    best_lambda = average_dt$l1_penalty[best_idx],
-    best_basis_number = average_dt$basis_n[best_idx]
-  )
+  list(best_lambda = average_dt$l1_penalty[best_idx],
+       best_basis_number = average_dt$basis_n[best_idx])
 }
 
-fit_sieve_with_cv <- function(all_data, type = "cosine", n_folds = 5) {
-  p = ncol(all_data) - 1 # first column is y
+fit_sieve_with_cv <- function(X, Y, type = "cosine", n_folds = 5) {
+  p = ncol(X)
+  # basis_numbers <- p * c(2, 4, 8) # temporarily fixed for pilot study
   basis_numbers <- NULL
-  best_hyperparameter = cross_validated_sieve(
-    all_data = all_data,
-    basis_numbers = basis_numbers,
-    n_folds = n_folds,
-    type = type
-  )
-  sieve_model = sieve_preprocess(
-    X = all_data[, 2:(p + 1)],
-    basisN = best_hyperparameter$best_basis_number,
-    type = type
-  )
-  sieve_fit = sieve_solver(
-    model = sieve_model,
-    Y = all_data$Y,
-    lambda = best_hyperparameter$best_lambda
-  )
+  best_hyperparameter = cross_validated_sieve(X, Y, basis_numbers, n_folds, type)
+  sieve_model = sieve_preprocess(X, 
+                                 basisN = best_hyperparameter$best_basis_number,
+                                 type = type)
+  sieve_fit = sieve_solver(sieve_model, Y, lambda = best_hyperparameter$best_lambda)
   list(hyperparameter = best_hyperparameter, sieve_fit = sieve_fit)
 }
 
-# x_proxy: n x p matrix. First p1 features are common in proxy and target domains; remaining p2 are proxy-only.
-cv_fitH_from_prxy <- function(x_proxy, p1, type = "linear", n_folds = 5, n_cores = 1) {
-  p2 <- ncol(x_proxy) - p1
-  if (p2 <= 0) stop("x_proxy must contain proxy-only columns beyond p1.")
-  x_common = x_proxy[, 1:p1, drop = FALSE]
-  x_proxy_only = x_proxy[, (p1 + 1):(p1 + p2), drop = FALSE]
-  coef_list = vector("list", p2)
+fmap_predict <- function(fmap, X, type = 'sieve') {
+  n <- nrow(X)
+  p2 <- length(fmap)
+  hat_Z <- matrix(0, n, p2)
   if (type == 'sieve') {
-    fit_one_proxy_col <- function(p2id) {
-      df = data.frame(Y = x_proxy_only[, p2id], x_common, check.names = FALSE)
-      sieve_cv_fit = fit_sieve_with_cv(df, type = 'cosine', n_folds = n_folds)
-      as.numeric(sieve_cv_fit$sieve_fit$beta_hat)
+    for (p2id in 1:p2) {
+      hat_Z[, p2id] = sieve_predict(fmap[[p2id]]$sieve_fit, X)$predictY
     }
-    if (.Platform$OS.type == "unix" && n_cores > 1) {
-      if (requireNamespace("pbmcapply", quietly = TRUE)) {
-        coef_list = pbmcapply::pbmclapply(
-          seq_len(p2),
-          fit_one_proxy_col,
-          mc.cores = n_cores
-        )
-      } else {
-        message("Install 'pbmcapply' to show a parallel progress bar: install.packages('pbmcapply')")
-        coef_list = parallel::mclapply(seq_len(p2), fit_one_proxy_col, mc.cores = n_cores)
-      }
-    } else {
-      coef_list = lapply(seq_len(p2), fit_one_proxy_col)
-    }
-    max_len = max(lengths(coef_list))
-    emap = matrix(0, nrow = max_len, ncol = p2)
-    for (p2id in seq_along(coef_list)) {
-      coef_vec = coef_list[[p2id]]
-      emap[seq_along(coef_vec), p2id] = coef_vec
-    }
-    colnames(emap) = colnames(x_proxy_only)
   } else if (type == 'linear') {
-    lm_fit <- lm(x_proxy_only ~ x_common - 1)
-    emap <- coef(lm_fit)
+    for (p2id in 1:p2) {
+      hat_Z[, p2id] = predict(fmap[[p2id]], X, s = 'lambda.min')
+    }
   }
-  emap
+  colnames(hat_Z) <- names(fmap) 
+  return(hat_Z)
+}
+
+cv_fitH_from_prxy <- function(x_common, x_prxy_only, type = "linear", n_folds = 5, n_cores = 1) {
+  p2 <- ncol(x_prxy_only)
+  fit_one_prxy_col <- function(p2id, type) {
+    y <- x_prxy_only[, p2id]
+    if (type == 'sieve') fit_sieve_with_cv(x_common, y, 'cosine', n_folds)
+    else if (type == 'linear')
+      glmnet(x_common, y, alpha = 0, lambda = 0)
+      # cv.glmnet(x_common, y, alpha = 0, nfolds = n_folds)
+  }
+  if (.Platform$OS.type == "unix" && n_cores > 1) {
+    if (requireNamespace("pbmcapply", quietly = TRUE)) {
+      sieve_fits = pbmcapply::pbmclapply(
+        seq_len(p2), fit_one_prxy_col, mc.cores = n_cores, type = type
+      )
+    } else {
+      message("Install 'pbmcapply' to show a parallel progress bar: install.packages('pbmcapply')")
+      sieve_fits = parallel::mclapply(seq_len(p2), fit_one_prxy_col, 
+                                      type = type, mc.cores = n_cores)
+    }
+  } else sieve_fits = lapply(seq_len(p2), fit_one_prxy_col, type = type)
+  max_len = max(lengths(sieve_fits))
+  names(sieve_fits) <- colnames(x_prxy_only)
+  sieve_fits
 }

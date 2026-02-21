@@ -1,7 +1,17 @@
 # Codes by Max Russo (russo.325@osu.edu)
 # Updated by Jae Chang (chang.2090@osu.edu)
 
-# preliminary functions
+library(curatedOvarianData)
+library(glmnet)
+library(dplyr)
+library(limma)
+library(ggplot2)
+source('sv-cv.R')
+
+
+# custom functions --------------------------------------------------------
+
+
 calc_rmse = function(y_trth, y_prd) sqrt(mean((y_trth - y_prd)^2))
 safe_ols_predict = function(x_trn, y_trn, x_tst) {
   x_trn_i = cbind(1, x_trn)
@@ -12,120 +22,140 @@ safe_ols_predict = function(x_trn, y_trn, x_tst) {
   as.numeric(x_tst_i[, keep, drop = FALSE] %*% coef_keep)
 }
 
-library(curatedOvarianData)
-library(limma) ## needed for matrix manipulation
-library(glmnet)
-library(dplyr)
-library(ggplot2)
+# data prep ---------------------------------------------------------------
 
-source('sv-cv.R')
-if (!requireNamespace("ggplot2", quietly = TRUE)) {
-  stop("Package 'ggplot2' is required. Please install it with install.packages('ggplot2').")
-}
-## load target and proxy data
-data(GSE9891_eset)
+
 data(GSE26712_eset)
-target_eset = t(as.matrix(GSE9891_eset))
-prxyeset = t(as.matrix(GSE26712_eset))
+data(GSE9891_eset)
+prxy_eset <- GSE26712_eset
+trgt_eset <- GSE9891_eset
 
-## select subject ids
-target_deceased_ids = which(GSE9891_eset@phenoData$vital_status == "deceased")
-prxydeceased_ids = which(GSE26712_eset@phenoData$vital_status == "deceased")
+prxy_m = t(limma::as.matrix.ExpressionSet(prxy_eset))
+trgt_m = t(limma::as.matrix.ExpressionSet(trgt_eset))
 
-read_var_file = function(filename) {
-  if (file.exists(filename)) return(read.csv(filename)[, 2])
-  read.csv(file.path("CuratedOvarianCancer", filename))[, 2]
-}
-target_variables = read_var_file("CuratedOvarianCancer/target_26_var.csv")
-prxyvariables = read_var_file("CuratedOvarianCancer/proxy_98_var.csv")
+## select subjects id
+id_sel_prxy = which(prxy_eset@phenoData$vital_status  =='deceased')
+id_sel_trgt = which(trgt_eset@phenoData$vital_status =='deceased')
 
-x_trgt = target_eset[target_deceased_ids, which(colnames(target_eset) %in% target_variables)]
-y_trgt = log(GSE9891_eset@phenoData$days_to_death[target_deceased_ids])
-x_proxy = prxyeset[prxydeceased_ids, which(colnames(prxyeset) %in% prxyvariables)]
-y_proxy = log(GSE26712_eset@phenoData$days_to_death[prxydeceased_ids])
+prxy_variables = read.csv("CuratedOvarianCancer/proxy_var.csv")[, 2] %>% sort
+trgt_variables = read.csv("CuratedOvarianCancer/target_var.csv")[, 2] %>% sort
 
-## align common variables by name for both datasets
-common_vars = intersect(colnames(x_trgt), colnames(x_proxy))
+
+x_trgt = trgt_m[id_sel_trgt, trgt_variables]
+y_trgt = log(trgt_eset@phenoData$days_to_death[id_sel_trgt])
+
+x_prxy = prxy_m[id_sel_prxy, prxy_variables]
+y_prxy = log(prxy_eset@phenoData$days_to_death[id_sel_prxy])
+
+dim(x_prxy)
+dim(x_trgt)
+
+common_vars <- which(prxy_variables %in% trgt_variables)
+extra_prxy_vars <- which(!prxy_variables %in% trgt_variables)
+common_vars <- which(colnames(x_prxy) %in% colnames(x_trgt))
+extra_prxy_vars = setdiff(1:ncol(x_prxy), common_vars)
 p1 <- length(common_vars)
-extra_prxyvars = setdiff(colnames(x_proxy), common_vars)
-p2 <- length(extra_prxyvars)
-x_trgt = scale(x_trgt[, common_vars, drop = FALSE], scale = FALSE)
-x_proxy = scale(x_proxy[, c(common_vars, extra_prxyvars), drop = FALSE], scale = FALSE)
+p2 <- length(extra_prxy_vars)
+x_prxy <- x_prxy[, c(common_vars, extra_prxy_vars)]
+x_trgt <- x_trgt[, colnames(x_prxy)[1:p1]]
 
 if (p1 == 0) stop("No common variables between target and proxy datasets.")
 if (p2 == 0) stop("Proxy dataset has no proxy-only variables after alignment.")
 
 
-## regression on proxy data (one time)
-prxyridge_cv = cv.glmnet(x_proxy, y_proxy, alpha = 0, intercept = T)
-prxyridge_cv_hmtl = cv.glmnet(x_proxy[, 1:p1, drop = FALSE], y_proxy, alpha = 0, intercept = T)
-prxybeta = coef(prxyridge_cv, s = prxyridge_cv$lambda.min)[-1, 1]
-prxybeta_hmtl = coef(prxyridge_cv_hmtl, s = prxyridge_cv_hmtl$lambda.min)[-1, 1]
+# feature mapping ---------------------------------------------------------
 
-## feature map
-prxyH_lin = cv_fitH_from_prxy(x_proxy, p1, 'linear')
-prxyH_sv = cv_fitH_from_prxy(x_proxy, p1, 'sieve', 5, 8)
 
+fmap_linear = cv_fitH_from_prxy(x_prxy[, 1:p1], x_prxy[, 1:p2 + p1], 'linear', 5, 8)
+fmap_sv = cv_fitH_from_prxy(x_prxy[, 1:p1], x_prxy[, 1:p2 + p1], 'sieve', 5, 8)
 # save.image('CuratedOvarianCancer/021726.rdata')
-load('CuratedOvarianCancer/021726.rdata')
+# load('CuratedOvarianCancer/021726.rdata')
 
-seed.no <- sample(1:3e4, 1);{set.seed(seed.no)
+hat_z_prxy_linear <- fmap_predict(fmap_linear, x_prxy[, 1:p1], 'linear')
+hat_z_prxy_sieve <- fmap_predict(fmap_sv, x_prxy[, 1:p1])
+calc_rmse(x_prxy[, 1:p2 + p1], hat_z_prxy_linear)
+calc_rmse(x_prxy[, 1:p2 + p1], hat_z_prxy_sieve)
+par(mfrow = c(1, 2))
+{
+  i = 43
+  plot(hat_z_prxy_linear[, i], x_prxy[, p1 + i])
+  abline(0, 1)
+  plot(hat_z_prxy_sieve[, i], x_prxy[, p1 + i])
+  abline(0, 1)
+}
+
+cat("Linear prediction variance:", var(hat_z_prxy_linear[, 1]), "\n")
+cat("Sieve prediction variance:", var(hat_z_prxy_sieve[, 1]), "\n")
+
+# proxy model -------------------------------------------------------------
+
+prxy_fit_cv = cv.glmnet(x_prxy, y_prxy, alpha = 1)
+prxy_fit_cv_hmtl = cv.glmnet(x_prxy[, 1:p1], y_prxy, alpha = 1)
+par(mfrow = c(1, 2))
+plot(prxy_fit_cv)
+plot(prxy_fit_cv_hmtl)
+
+
+# CV ----------------------------------------------------------------------
+
+
 n_folds = 5
 n_trgt = nrow(x_trgt)
+no <- 1
+{set.seed(no)
 fold_id = sample(rep(1:n_folds, length.out = n_trgt))
 fold_indices = split(seq_len(n_trgt), fold_id)
-
-## CV
 rmse_ols = rmse_htl_sv = rmse_htl_lin = rmse_hmtl = rmse_lasso = numeric(n_folds)
 for (fold_idx in seq_len(n_folds)) {
   tst_idx = fold_indices[[fold_idx]]
-  trn_idx = setdiff(1:n_trgt, tst_idx)
-  x_trn = x_trgt[trn_idx, ]
-  y_trn = y_trgt[trn_idx]
-  x_tst = x_trgt[tst_idx, , drop = FALSE]
+  x_trn = x_trgt[-tst_idx, ]
+  y_trn = y_trgt[-tst_idx]
+  x_tst = x_trgt[tst_idx, ]
   y_tst = y_trgt[tst_idx]
 
   ## Stage 1: Imputation using X1
-  hat_z_trn_lin = x_trn %*% prxyH_lin
-  hat_z_tst_lin = x_tst %*% prxyH_lin
-  M <- nrow(prxyH_sv)
-  Phi <- sieve_preprocess(x_trn, basisN = M, type = 'cosine')$Phi
-  hat_z_trn_sv = Phi %*% prxyH_sv
-  Phi <- sieve_preprocess(x_tst, basisN = M, type = 'cosine')$Phi
-  hat_z_tst_sv = Phi %*% prxyH_sv
-
+  ## linear
+  hat_z_trn_lin = fmap_predict(fmap_linear, x_trn, 'linear')
+  hat_z_tst_lin = fmap_predict(fmap_linear, x_tst, 'linear')
+  ## sieve
+  hat_z_trn_sv <- fmap_predict(fmap_sv, x_trn)
+  hat_z_tst_sv <- fmap_predict(fmap_sv, x_tst)
+  
   ## Stage 2: Estimation
   ## HTL
   hat_d_trn <- cbind(x_trn, hat_z_trn_lin)
-  y_rsd_trn_lin = y_trn - hat_d_trn %*% prxybeta
-  htl_cv_lin = cv.glmnet(hat_d_trn, y_rsd_trn_lin, alpha = 1, intercept = T)
-  hat_d_test = cbind(x_tst, hat_z_tst_lin)
-  y_prd_htl_lin = predict(htl_cv_lin, newx = hat_d_test, s = "lambda.min") + hat_d_test %*% prxybeta
+  y_rsd_trn_lin = y_trn - predict(prxy_fit_cv, hat_d_trn, s = 'lambda.1se')
+  htl_cv_lin = cv.glmnet(hat_d_trn, y_rsd_trn_lin, alpha = 1)
+  hat_d_tst = cbind(x_tst, hat_z_tst_lin)
+  y_prd_htl_lin = predict(htl_cv_lin, newx = hat_d_tst, s = "lambda.1se") + 
+    predict(prxy_fit_cv, hat_d_tst, s = 'lambda.1se')
   
-  hat_d_tst <- cbind(x_tst, hat_z_tst_lin)
-  y_rsd_trn_sv = y_trn - cbind(x_trn, hat_z_trn_sv) %*% prxybeta
-  htl_cv_sv = cv.glmnet(cbind(x_trn, hat_z_trn_sv), y_rsd_trn_sv, alpha = 1)
-  hat_d_test = cbind(x_tst, hat_z_tst_sv)
-  y_prd_htl_sv = predict(htl_cv_sv, newx = hat_d_test, s = "lambda.min") + hat_d_test %*% prxybeta
-
-  ## lasso prediction
-  lasso_cv = cv.glmnet(x_trn, y_trn, alpha = 1, intercept = T)
-  y_prd_lasso = predict(lasso_cv, newx = x_tst, s = "lambda.min")
-
-  ## OLS with rank-deficiency handling
-  y_prd_ols = safe_ols_predict(x_trn, y_rsd_trn_lin, x_tst)
+  hat_d_trn_sv <- cbind(x_trn, hat_z_trn_sv)
+  y_rsd_trn_sv = y_trn - predict(prxy_fit_cv, hat_d_trn_sv, s = 'lambda.1se')
+  htl_cv_sv = cv.glmnet(hat_d_trn_sv, y_rsd_trn_sv, alpha = 1)
+  hat_d_tst_sv = cbind(x_tst, hat_z_tst_sv)
+  y_prd_htl_sv = predict(htl_cv_sv, newx = hat_d_tst_sv, s = "lambda.1se") + 
+    predict(prxy_fit_cv, hat_d_tst_sv, s = 'lambda.1se')
 
   ## HmTL (hmtl)
-  y_residual_hmtl = y_trn - x_trn %*% prxybeta_hmtl
-  hmtl_cv = cv.glmnet(x_trn, y_residual_hmtl, alpha = 1, intercept = T)
-  y_prd_hmtl = predict(hmtl_cv, newx = x_tst, s = "lambda.min") + x_tst %*% prxybeta_hmtl
+  y_rsd_hmtl = y_trn - predict(prxy_fit_cv_hmtl, x_trn, s = 'lambda.1se')
+  hmtl_cv = cv.glmnet(x_trn, y_rsd_hmtl, alpha = 1)
+  y_prd_hmtl = predict(hmtl_cv, x_tst, s = "lambda.1se") + 
+    predict(prxy_fit_cv_hmtl, x_tst, s = "lambda.1se")
+  
+  ## lasso prediction
+  lasso_cv = cv.glmnet(x_trn, y_trn, alpha = 1)
+  y_prd_lasso = predict(lasso_cv, newx = x_tst, s = "lambda.1se")
+
+  ## OLS with rank-deficiency handling
+  y_prd_ols = safe_ols_predict(x_trn, y_trn, x_tst)
 
   ## errors
   rmse_ols[fold_idx] = calc_rmse(y_tst, y_prd_ols)
   rmse_htl_sv[fold_idx] = calc_rmse(y_tst, y_prd_htl_sv)
   rmse_htl_lin[fold_idx] = calc_rmse(y_tst, y_prd_htl_lin)
-  rmse_lasso[fold_idx] = calc_rmse(y_tst, y_prd_lasso)
   rmse_hmtl[fold_idx] = calc_rmse(y_tst, y_prd_hmtl)
+  rmse_lasso[fold_idx] = calc_rmse(y_tst, y_prd_lasso)
 }
 
 rmse_df = rbind(
@@ -134,23 +164,22 @@ rmse_df = rbind(
   data.frame(fold = seq_len(n_folds), method = "HmTL", rmse = rmse_hmtl),
   data.frame(fold = seq_len(n_folds), method = "Lasso", rmse = rmse_lasso),
   data.frame(fold = seq_len(n_folds), method = "OLS", rmse = rmse_ols)
-)
+) %>% filter(method != 'OLS')
 rmse_df$method = factor(rmse_df$method, levels = c('HTL-sieve', "HTL-linear", "HmTL", "Lasso", "OLS"))
-rmse_df <- rmse_df %>% filter(method != 'OLS')
 
 rmse_summary = aggregate(rmse ~ method, rmse_df, function(x) {
-  c(
-    mean = mean(x),
-    lower = mean(x) - 2 * sd(x) / sqrt(length(x)),
-    upper = mean(x) + 2 * sd(x) / sqrt(length(x))
-  )
+c(
+  mean = mean(x),
+  lower = mean(x) - 2 * sd(x) / sqrt(length(x)),
+  upper = mean(x) + 2 * sd(x) / sqrt(length(x))
+)
 })
 
 rmse_summary = data.frame(
-  method = rmse_summary$method,
-  mean = rmse_summary$rmse[, "mean"],
-  lower = rmse_summary$rmse[, "lower"],
-  upper = rmse_summary$rmse[, "upper"]
+method = rmse_summary$method,
+mean = rmse_summary$rmse[, "mean"],
+lower = rmse_summary$rmse[, "lower"],
+upper = rmse_summary$rmse[, "upper"]
 )
 
 p = ggplot2::ggplot(rmse_df, ggplot2::aes(x = method, y = rmse)) +
@@ -164,7 +193,7 @@ p = ggplot2::ggplot(rmse_df, ggplot2::aes(x = method, y = rmse)) +
   ggplot2::geom_point(
     data = rmse_summary,
     ggplot2::aes(x = method, y = mean),
-    inherit.aes = FALSE, shape = 95, size = 4, color = "black"
+    inherit.aes = FALSE, shape = 95, size = 10, color = "black"
   ) +
   ggplot2::labs(x = NULL, y = "Root Mean Squared Error") +
   ggplot2::theme_classic(base_size = 11) +
