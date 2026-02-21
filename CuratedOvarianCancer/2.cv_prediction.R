@@ -66,9 +66,9 @@ if (p2 == 0) stop("Proxy dataset has no proxy-only variables after alignment.")
 # feature mapping ---------------------------------------------------------
 
 
-fmap_linear = cv_fitH_from_prxy(x_prxy[, 1:p1], x_prxy[, 1:p2 + p1], 'linear', 5, 8)
-fmap_sv = cv_fitH_from_prxy(x_prxy[, 1:p1], x_prxy[, 1:p2 + p1], 'sieve', 5, 8)
-# save.image('CuratedOvarianCancer/021726.rdata')
+fmap_linear = cv_fitH_from_prxy(x_prxy[, 1:p1], x_prxy[, 1:p2 + p1], 'linear', 5)
+fmap_sv = cv_fitH_from_prxy(x_prxy[, 1:p1], x_prxy[, 1:p2 + p1], 'sieve', 5)
+save.image('CuratedOvarianCancer/021726.rdata')
 # load('CuratedOvarianCancer/021726.rdata')
 
 hat_z_prxy_linear <- fmap_predict(fmap_linear, x_prxy[, 1:p1], 'linear')
@@ -77,7 +77,7 @@ calc_rmse(x_prxy[, 1:p2 + p1], hat_z_prxy_linear)
 calc_rmse(x_prxy[, 1:p2 + p1], hat_z_prxy_sieve)
 par(mfrow = c(1, 2))
 {
-  i = 43
+  i = 1
   plot(hat_z_prxy_linear[, i], x_prxy[, p1 + i])
   abline(0, 1)
   plot(hat_z_prxy_sieve[, i], x_prxy[, p1 + i])
@@ -99,12 +99,11 @@ plot(prxy_fit_cv_hmtl)
 # CV ----------------------------------------------------------------------
 
 
-n_folds = 5
 n_trgt = nrow(x_trgt)
-no <- 1
+n_folds = 5
+no <- 1234
 {set.seed(no)
-fold_id = sample(rep(1:n_folds, length.out = n_trgt))
-fold_indices = split(seq_len(n_trgt), fold_id)
+fold_indices = index_spliter(1:n_trgt, n_folds)
 rmse_ols = rmse_htl_sv = rmse_htl_lin = rmse_hmtl = rmse_lasso = numeric(n_folds)
 for (fold_idx in seq_len(n_folds)) {
   tst_idx = fold_indices[[fold_idx]]

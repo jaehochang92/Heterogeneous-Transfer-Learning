@@ -6,29 +6,27 @@
 library(data.table)
 library(Sieve)
 
-index_splitter <- function(index_array, n_folds = 5) {
-  part_length = length(index_array) %/% n_folds
-  fold_parts = vector("list", n_folds)
-  shuffled_index = sample(index_array)
-  for (fold_idx in seq_len(n_folds)) {
-    start_idx = (fold_idx - 1) * part_length + 1
-    end_idx = if (fold_idx < n_folds) fold_idx * part_length else length(index_array)
-    fold_parts[[fold_idx]] = shuffled_index[start_idx:end_idx]
-  }
-  fold_parts
+index_spliter <- function(array, n_folds = 5){
+  len <- length(array)
+  fold_id = sample(rep(1:n_folds, length.out = len))
+  split(seq_len(len), fold_id)
 }
 
-sieve_solver <- function (model, Y, l1 = TRUE, family = "gaussian", lambda = NULL){
+sieve_solver <- function (model, Y, l1 = TRUE, family = "gaussian", 
+                          lambda = NULL, cv = F){
   if (l1 == FALSE) {
     Phi <- model$Phi
     beta_hat <- least_square_C(Phi, Y)
     model$beta_hat <- beta_hat
   } else {
-    glmnet.fit <- glmnet(model$Phi[, -1], Y, family = family, alpha = 1, 
-                         lambda = lambda, intercept = TRUE, standardize = FALSE)
+    if (cv) glmnet.fit <- cv.glmnet(model$Phi[, -1], Y, family = family, alpha = 1,
+                                    intercept = TRUE, standardize = FALSE, nlambda = 2e2)
+    else glmnet.fit <- glmnet(model$Phi[, -1], Y, family = family, alpha = 1, 
+                              lambda = lambda, intercept = TRUE, standardize = FALSE)
     model$lambda <- glmnet.fit$lambda
     model$beta_hat <- coef(glmnet.fit)
     model$family <- family
+    model$fit <- glmnet.fit
   }
   return(model)
 }
@@ -42,14 +40,13 @@ cross_validated_sieve <- function(X, Y, basis_numbers = NULL, n_folds = 5, type 
       , p^2 * c(5, n_sample^(1 / 5), n_sample^(1 / 3))
     ))
   }
-
-  validation_split_idx = index_splitter(seq_len(n_sample), n_folds = n_folds)
+  validation_split_idx = index_spliter(seq_len(n_sample), n_folds = n_folds)
   total_iterations = length(basis_numbers) * n_folds
   tuning_rows_list = vector("list", total_iterations)
   list_idx <- 1
   for (basis_n in basis_numbers) {
     global_model = sieve_preprocess(X, basis_n, type = type)
-    global_fit = sieve_solver(global_model, Y, lambda = NULL)
+    global_fit = sieve_solver(global_model, Y, lambda = NULL, cv = T)
     global_lambda = global_fit$lambda
     for (split_idx in seq_len(n_folds)) {
       train_X = X[-validation_split_idx[[split_idx]], , drop = FALSE]
@@ -86,11 +83,9 @@ cross_validated_sieve <- function(X, Y, basis_numbers = NULL, n_folds = 5, type 
 
 fit_sieve_with_cv <- function(X, Y, type = "cosine", n_folds = 5) {
   p = ncol(X)
-  # basis_numbers <- p * c(2, 4, 8) # temporarily fixed for pilot study
   basis_numbers <- NULL
   best_hyperparameter = cross_validated_sieve(X, Y, basis_numbers, n_folds, type)
-  sieve_model = sieve_preprocess(X, 
-                                 basisN = best_hyperparameter$best_basis_number,
+  sieve_model = sieve_preprocess(X, basisN = best_hyperparameter$best_basis_number,
                                  type = type)
   sieve_fit = sieve_solver(sieve_model, Y, lambda = best_hyperparameter$best_lambda)
   list(hyperparameter = best_hyperparameter, sieve_fit = sieve_fit)
@@ -106,20 +101,21 @@ fmap_predict <- function(fmap, X, type = 'sieve') {
     }
   } else if (type == 'linear') {
     for (p2id in 1:p2) {
-      hat_Z[, p2id] = predict(fmap[[p2id]], X, s = 'lambda.min')
+      hat_Z[, p2id] = predict(fmap[[p2id]], X, s = 'lambda.1se')
     }
   }
   colnames(hat_Z) <- names(fmap) 
   return(hat_Z)
 }
 
-cv_fitH_from_prxy <- function(x_common, x_prxy_only, type = "linear", n_folds = 5, n_cores = 1) {
+cv_fitH_from_prxy <- function(x_common, x_prxy_only, type = "linear", n_folds = 5) {
+  n_cores <- parallel::detectCores() - 2
   p2 <- ncol(x_prxy_only)
   fit_one_prxy_col <- function(p2id, type) {
     y <- x_prxy_only[, p2id]
     if (type == 'sieve') fit_sieve_with_cv(x_common, y, 'cosine', n_folds)
     else if (type == 'linear')
-      glmnet(x_common, y, alpha = 0, lambda = 0)
+      glmnet(x_common, y, alpha = 1, lambda = 0) # OLS
       # cv.glmnet(x_common, y, alpha = 0, nfolds = n_folds)
   }
   if (.Platform$OS.type == "unix" && n_cores > 1) {
@@ -137,3 +133,30 @@ cv_fitH_from_prxy <- function(x_common, x_prxy_only, type = "linear", n_folds = 
   names(sieve_fits) <- colnames(x_prxy_only)
   sieve_fits
 }
+
+
+# test --------------------------------------------------------------------
+
+
+# xdim <- 10
+# AllData <- GenSamples(s.size = 1000, xdim = xdim)
+# type <- 'cosine'
+# 
+# best_hyperparameter <- cross_validated_sieve(AllData[, -1], AllData$Y)
+# print(best_hyperparameter)
+# 
+# sieve.model <- sieve_preprocess(X = AllData[, 2:(xdim + 1)],
+#                                 basisN = best_hyperparameter$best_basis_number,
+#                                 type = type)
+# sieve.fit <- sieve_solver(model = sieve.model,
+#                           Y = AllData$Y,
+#                           lambda = best_hyperparameter$best_lambda)
+# 
+# TestData <- GenSamples(s.size = 500, xdim = xdim)
+# sieve.test <- sieve_predict(model = sieve.fit,
+#                             testX = TestData[, 2:(xdim + 1)],
+#                             testY = TestData$Y)
+# 
+# calc_rmse(sieve.test$predictY, TestData$Y)
+# plot(sieve.test$predictY, TestData$Y)
+# abline(0, 1)
