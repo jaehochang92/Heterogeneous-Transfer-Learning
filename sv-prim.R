@@ -1,33 +1,3 @@
-# Add two matrices with zero-padding (no name handling)
-add_mats_pad <- function(A, B) {
-  if (is.null(A)) return(B)
-  R <- max(nrow(A), nrow(B))
-  C <- max(ncol(A), ncol(B))
-  pad <- function(M) {
-    out <- matrix(0, R, C)
-    out[seq_len(nrow(M)), seq_len(ncol(M))] <- M
-    out
-  }
-  pad(A) + pad(B)
-}
-
-# For cbind with padding
-cbind_pad0 <- function(..., fill = 0) {
-  xs <- list(...)
-  # make sure vectors become column matrices
-  xs <- lapply(xs, function(x) {
-    if (is.null(dim(x))) matrix(x, ncol = 1) else x
-  })
-  maxr <- max(sapply(xs, nrow))
-  xs_pad <- lapply(xs, function(y) {
-    if (nrow(y) < maxr) {
-      rbind(y, matrix(fill, nrow = maxr - nrow(y), ncol = ncol(y),
-                      dimnames = list(NULL, colnames(y))))
-    } else y
-  })
-  do.call(cbind, xs_pad)
-}
-
 ## additive map by Zhang and Simon, 2023
 hj <- function(x, j, A) {
   y <- 0

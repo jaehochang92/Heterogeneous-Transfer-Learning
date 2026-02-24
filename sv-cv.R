@@ -36,8 +36,8 @@ cross_validated_sieve <- function(X, Y, basis_numbers = NULL, n_folds = 5, type 
   n_sample <- nrow(X)
   if (is.null(basis_numbers)) {
     basis_numbers = ceiling(c(
-      p * c(5, n_sample^(1 / 5), n_sample^(1 / 3))
-      , p^2 * c(5, n_sample^(1 / 5), n_sample^(1 / 3))
+      p * c(3, n_sample^(1 / 5), n_sample^(1 / 3))
+      # , p^2 * c(3, n_sample^(1 / 5), n_sample^(1 / 3))
     ))
   }
   validation_split_idx = index_spliter(seq_len(n_sample), n_folds = n_folds)
