@@ -48,6 +48,4 @@ __pycache__/
 *.pyc
 
 # Brewing
-Batch/
-AlgorithmBlocks/
-Simulations/
+brewing../
