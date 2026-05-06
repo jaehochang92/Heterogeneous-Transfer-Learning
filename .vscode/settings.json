@@ -1,0 +1,12 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^python3 -c '\nwith open\\(\"Full_sparseopt\\.tex\"\\) as f:\n    lines = f\\.readlines\\(\\)\ncount = 0\nfor i, line in enumerate\\(lines\\):\n    if \"\\\\\\\\ble\" in line or \"\\\\\\\\blems\" in line:\n        count \\+= 1\n    if \"LemGarvesh\" in line:\n        print\\(f\"LemGarvesh is Lemma \\{count\\}\"\\)\n        break\n'$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python3 -c '\nimport re\nwith open\\(\"Full_sparseopt\\.tex\"\\) as f:\n    content = f\\.read\\(\\)\nlemmas = re\\.findall\\(r\"\\\\\\\\begin\\\\\\{lem\\\\\\}\\|\\\\\\\\begin\\\\\\{lems\\\\\\}\\|\\\\\\\\ble\\\\b\\|\\\\\\\\blems\\\\b\", content\\)\nprint\\(len\\(lemmas\\)\\)\n'$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

@@ -14,6 +14,7 @@ source('simulation.R')
 
 # Main execution function
 run_simulation <- function(n_sim = 50,
+                          K = 1,
                           n_source = 500,
                           n_target_train = 100,
                           n_target_test = 100,
@@ -27,12 +28,14 @@ run_simulation <- function(n_sim = 50,
     cat("\n")
     cat(paste(rep("=", 80), collapse = ""), "\n")
     cat("TRANSFER LEARNING SIMULATION\n")
+    if (K > 1) cat(sprintf("(Multiple Sources: K=%d)\n", K), sep = "")
     cat(paste(rep("=", 80), collapse = ""), "\n\n")
   }
   
   # Run simulation
   results <- main(
     n_sim = n_sim,
+    K = K,
     n_source = n_source,
     n_target_train = n_target_train,
     n_target_test = n_target_test,

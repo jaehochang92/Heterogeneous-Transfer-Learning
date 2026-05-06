@@ -2,30 +2,37 @@
 
 ## What Was Created
 
-This package implements a comprehensive simulation comparing **4 methods** for transfer learning:
+This package supports transfer learning simulations with both **single source** (K=1) and **multiple sources** (K>1):
 
+### Single Source (K=1) - 4 Methods
 1. **HTL-Linear**: Heterogeneous TL with linear feature mapping
 2. **HTL-Sieve**: Heterogeneous TL with non-linear sieve estimation  
 3. **HmTL**: Homogeneous TL (same features across domains)
+4. **Lasso-Only**: Baseline using target data only
+
+### Multiple Sources (K>1) - 4 Methods
+1. **HTL-Linear-Multi**: Aggregates linear mappings from K sources
+2. **HTL-Sieve-Multi**: Aggregates sieve-based mappings from K sources
+3. **HmTL-Multi**: Pools K homogeneous source datasets
 4. **Lasso-Only**: Baseline using target data only
 
 ## File Summary
 
 | File | Purpose |
 |------|---------|
-| `simulation.R` | Core simulation: data generation, all 4 methods, main loop |
-| `sv-cv.R` | Sieve basis estimation with cross-validation (dependency) |
+| `simulation.R` | Core: data generation, all methods, supports K parameter |
+| `run_simulation.R` | Wrapper function with K support |
+| `test_simulation.R` | Tests both K=1 and K>1 scenarios |
+| `sv-cv.R` | Sieve basis estimation (dependency) |
 | `sv-prim.R` | Non-linear basis functions (dependency) |
-| `run_simulation.R` | Convenient wrapper to launch simulations |
-| `summarize_sim.R` | Print summary statistics and t-tests |
-| `plot_sim_results.R` | Create visualization plots |
-| `test_simulation.R` | Quick test to verify everything works |
+| `summarize_sim.R` | Summary statistics and t-tests |
+| `plot_sim_results.R` | Visualization plots |
 | `SIMULATION_README.md` | Detailed documentation |
 
 ## The Key Difference: HTL vs HmTL
 
 ```
-Heterogeneous (HTL):          Homogeneous (HmTL):
+Single Source (K=1):          Homogeneous (HmTL):
 Source: X_s ∈ ℝ^(p1)         Source: X_s ∈ ℝ^p
 Target: X_t ∈ ℝ^(p2)         Target: X_t ∈ ℝ^p
 where p1 > p2                where same features
@@ -33,6 +40,8 @@ where p1 > p2                where same features
 Solution: Learn mapping      Solution: Combine source
 f: X_s → X̂_missing          & target data directly
 ```
+
+Multiple Sources: Repeat mapping for each source and aggregate.
 
 ## Quick Start: Run a Simulation
 
@@ -43,14 +52,15 @@ f: X_s → X̂_missing          & target data directly
 setwd('./Simulations')  # or navigate in terminal: cd Simulations
 ```
 
-### Option 1: Simple Interactive Run
+### Single-Source Simulation
 
 ```r
 source('simulation.R')
 
-# Run 50 simulations (5-10 minutes on modern hardware)
+# Run 50 simulations (single source, K=1)
 results <- main(
   n_sim = 50,           
+  K = 1,                # single source (default)
   n_source = 500,       
   n_target_train = 100, 
   n_target_test = 100,  
@@ -59,29 +69,54 @@ results <- main(
   regime = 'additive'   
 )
 
-# View results
-results$summary_stats  # Summary table
+print(results$summary_stats)
 ```
 
-### Option 2: Save and Summarize (from Simulations/ directory)
+### Multi-Source Simulation
+
+```r
+source('simulation.R')
+
+# Run 50 simulations with K=4 heterogeneous sources
+results <- main(
+  n_sim = 50,           
+  K = 4,                # 4 heterogeneous source datasets
+  n_source = 500,       
+  n_target_train = 100, 
+  n_target_test = 100,  
+  p1 = 15,              # source features per source
+  p2 = 8,               # target features
+  regime = 'additive'   
+)
+
+print(results$summary_stats)
+```
+
+### Option 2: Save and Summarize
 
 ```bash
 # Navigate to Simulations directory first
 cd Simulations
 
-# Run simulation and save results
-R --slave -e "
-  source('simulation.R')
-  set.seed(2026)
-  results <- main(100, 500, 100, 100, 15, 8, 'additive')
-  saveRDS(results, 'my_results.rds')
-"
+# Single-source simulation (K=1)
+R --slave -e "source('simulation.R'); set.seed(2026); 
+              results <- main(n_sim=100, K=1, n_source=500, 
+                            n_target_train=100, n_target_test=100, 
+                            p1=15, p2=8, regime='additive')
+              saveRDS(results, 'single_source.rds')"
+
+# Multi-source simulation (K=4)
+R --slave -e "source('simulation.R'); set.seed(2026); 
+              results <- main(n_sim=100, K=4, n_source=500, 
+                            n_target_train=100, n_target_test=100, 
+                            p1=15, p2=8, regime='additive')
+              saveRDS(results, 'multi_source_k4.rds')"
 
 # Print summary
-Rscript summarize_sim.R my_results.rds
+Rscript summarize_sim.R multi_source_k4.rds
 
 # Create plots
-Rscript plot_sim_results.R my_results.rds my_plots.pdf
+Rscript plot_sim_results.R multi_source_k4.rds
 ```
 
 ### Option 3: Using Convenient Wrapper
@@ -89,11 +124,13 @@ Rscript plot_sim_results.R my_results.rds my_plots.pdf
 ```r
 source('run_simulation.R')
 
-results <- run_simulation(
-  n_sim = 50,
-  regime = 'nonlinear',
-  save_file = 'htl_vs_baseline.rds'
-)
+# Single source
+results <- run_simulation(n_sim=50, K=1, p1=15, p2=8, regime='additive')
+
+# Multiple sources
+results_multi <- run_simulation(n_sim=50, K=4, p1=15, p2=8, 
+                                regime='additive',
+                                save_file='multi_k4_results.rds')
 ```
 
 ## Understanding the Output

@@ -1,0 +1,2 @@
+ml load gcc/12.3.0 R/4.4.0
+Rscript /users/PAS1316/jaechang/R/TL/sieve/bt-sim.R

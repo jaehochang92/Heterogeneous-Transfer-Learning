@@ -65,7 +65,8 @@ When running `main()` or `run_simulation()`, you can customize:
 ```r
 main(
   n_sim = 100,              # Number of simulation iterations
-  n_source = 500,           # Number of source training samples
+  K = 1,                    # Number of source datasets (1 or more)
+  n_source = 500,           # Number of source samples per source
   n_target_train = 100,     # Number of target training samples
   n_target_test = 100,      # Number of target test samples
   p1 = 15,                  # Number of source features
@@ -73,6 +74,17 @@ main(
   regime = 'additive'       # Data generation regime
 )
 ```
+
+### K Parameter
+
+- **K=1** (default): Single source scenario
+  - Methods: HTL_Linear, HTL_Sieve, HmTL, Lasso_Target_Only
+  - Generates 1 source dataset per iteration
+
+- **K>1**: Multiple heterogeneous sources scenario
+  - Methods: HTL_Linear_Multi, HTL_Sieve_Multi, HmTL_Multi, Lasso_Target_Only
+  - Generates K independent source datasets per iteration
+  - Aggregates information from all K sources
 
 ### Regime Options
 
