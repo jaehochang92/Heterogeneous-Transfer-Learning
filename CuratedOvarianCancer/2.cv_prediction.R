@@ -21,7 +21,7 @@ safe_ols_predict = function(x_trn, y_trn, x_tst) {
   as.numeric(x_tst_i[, keep, drop = FALSE] %*% coef_keep)
 }
 
-fit_htl <- function(x_trn, y_trn, x_tst, hat_z_trn = NULL, hat_z_tst = NULL, baseline_model) {
+fit_htl <- function(baseline_model, x_trn, y_trn, x_tst, hat_z_trn = NULL, hat_z_tst = NULL) {
   hat_d_trn <- if (is.null(hat_z_trn)) x_trn else cbind(x_trn, hat_z_trn)
   hat_d_tst <- if (is.null(hat_z_tst)) x_tst else cbind(x_tst, hat_z_tst)
   baseline_pred_trn <- predict(baseline_model, newx = hat_d_trn, s = 'lambda.min')
@@ -137,9 +137,9 @@ run.once <- function(no) {
     
     ## Predictions
     predictions <- list(
-      `HTL-sieve` = fit_htl(x_trn, y_trn, x_tst, hat_z_trn_sv, hat_z_tst_sv, prxy_fit_cv),
-      `HTL-linear` = fit_htl(x_trn, y_trn, x_tst, hat_z_trn_lin, hat_z_tst_lin, prxy_fit_cv),
-      HmTL = fit_htl(x_trn, y_trn, x_tst, baseline_model = prxy_fit_cv_hmtl),
+      `HTL-sieve` = fit_htl(prxy_fit_cv, x_trn, y_trn, x_tst, hat_z_trn_sv, hat_z_tst_sv),
+      `HTL-linear` = fit_htl(prxy_fit_cv, x_trn, y_trn, x_tst, hat_z_trn_lin, hat_z_tst_lin),
+      HmTL = fit_htl(prxy_fit_cv_hmtl, x_trn, y_trn, x_tst, hat_z_trn_lin, hat_z_tst_lin),
       Lasso = predict(cv.glmnet(x_trn, y_trn, alpha = 1), newx = x_tst, s = "lambda.min")
     )
     
