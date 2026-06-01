@@ -33,21 +33,13 @@ option_list <- list(
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 
-slurm_array_task_id <- as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID"))
-sweep_task_id <- as.integer(Sys.getenv("SIM_SWEEP_TASK_ID"))
-if (is.na(sweep_task_id)) {
-  sweep_task_id <- slurm_array_task_id
-}
-if (is.na(sweep_task_id)) {
-  sweep_task_id <- 1L
-}
-
 global_task_id <- as.integer(Sys.getenv("SIM_GLOBAL_TASK_ID"))
+slurm_array_task_id <- as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID"))
 if (is.na(global_task_id)) {
   global_task_id <- slurm_array_task_id
 }
 if (is.na(global_task_id)) {
-  global_task_id <- sweep_task_id
+  global_task_id <- 1L
 }
 
 log_dir <- "logs"
@@ -63,6 +55,7 @@ log_message <- function(msg) {
 
 sweep_plan <- build_sweep_plan(opt)
 total_tasks <- nrow(sweep_plan)
+sweep_task_id <- ((global_task_id - 1L) %% total_tasks) + 1L
 if (sweep_task_id > total_tasks) {
   log_message(sprintf(
     "Task id %d is out of range (max %d). Exiting cleanly.",

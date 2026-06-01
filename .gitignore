@@ -11,6 +11,10 @@
 *.Rds
 *.rds
 
+# Simulation logs and outputs
+Simulations-final/logs/
+Simulations-final/results/
+
 # Generated plots and documents
 *.pdf
 *.eps

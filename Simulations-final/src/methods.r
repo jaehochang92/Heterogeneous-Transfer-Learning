@@ -4,11 +4,6 @@ parse_int_list <- function(x) {
   as.integer(vals)
 }
 
-parse_chr_list <- function(x) {
-  vals <- trimws(unlist(strsplit(x, ",", fixed = TRUE)))
-  vals[nzchar(vals)]
-}
-
 build_sweep_plan <- function(opt) {
   fixed_cfg <- list(K = opt$K,
                     np = opt$np,
