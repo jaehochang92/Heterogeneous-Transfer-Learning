@@ -6,7 +6,7 @@ Here we list some example for submitting jobs in SLURM.
 
 한 번만 돌려서 파이프라인이 깨지지 않는지 확인합니다.
 
-    cd /Users/jaechang/git/Heterogeneous-Transfer-Learning-code/brewing../updated
+    cd ~/R/Heterogeneous-Transfer-Learning
     SLURM_ARRAY_TASK_ID=1 Rscript main.r \
       --seedno 100 \
       --rep 1 \
@@ -32,7 +32,7 @@ Here we list some example for submitting jobs in SLURM.
 
 작은 배열을 순차 실행해 sweep 분기와 파일 저장을 점검합니다.
 
-    cd /Users/jaechang/git/Heterogeneous-Transfer-Learning-code/brewing../updated
+    cd ~/R/Heterogeneous-Transfer-Learning
     for tid in 1 2 3 4; do
       echo "Running local task ${tid}"
       SLURM_ARRAY_TASK_ID=${tid} Rscript main.r \
@@ -62,7 +62,7 @@ CPU를 과도하게 쓰지 않도록 2개 동시 실행만 허용합니다.
 
 권장 (xargs 없이 안정적으로 병렬 제어):
 
-        cd "/Users/jaechang/git/Heterogeneous-Transfer-Learning-code/brewing../updated"
+        cd ~/R/Heterogeneous-Transfer-Learning
         max_jobs=2
         for tid in 1 2 3 4; do
             SLURM_ARRAY_TASK_ID="$tid" Rscript main.r \
@@ -87,7 +87,7 @@ CPU를 과도하게 쓰지 않도록 2개 동시 실행만 허용합니다.
 
 이건 간소화 버전:
 
-        cd "/Users/jaechang/git/Heterogeneous-Transfer-Learning-code/brewing../updated"
+        cd ~/R/Heterogeneous-Transfer-Learning
         max_jobs=2
         for tid in 1 2 3 4; do
             SLURM_ARRAY_TASK_ID="$tid" Rscript main.r &
@@ -99,7 +99,7 @@ CPU를 과도하게 쓰지 않도록 2개 동시 실행만 허용합니다.
 
 xargs를 꼭 쓰고 싶다면 한 줄 버전:
 
-        cd "/Users/jaechang/git/Heterogeneous-Transfer-Learning-code/brewing../updated"
+        cd ~/R/Heterogeneous-Transfer-Learning
         printf "%s\n" 1 2 3 4 | xargs -P2 -I{} bash -lc 'SLURM_ARRAY_TASK_ID={} Rscript main.r --seedno 100 --rep 1 --K 1 --np 80 --nt 20 --p1 10 --p2 5 --dgp_fmap nlinear --K_values 1,2 --np_values 80 --nt_values 20 --p1_values 10 --p2_values 5 --dgp_fmap_values linear,nlinear'
 
 확인 포인트:
@@ -110,7 +110,7 @@ xargs를 꼭 쓰고 싶다면 한 줄 버전:
 
 sbatch 없이 쉘 스크립트 동작만 확인하고 싶을 때 사용합니다.
 
-    cd /Users/jaechang/git/Heterogeneous-Transfer-Learning-code/brewing../updated
+    cd ~/R/Heterogeneous-Transfer-Learning
     export SLURM_ARRAY_JOB_ID=9999
     export SLURM_ARRAY_TASK_ID=1
     bash submit.sh
@@ -123,7 +123,7 @@ sbatch 없이 쉘 스크립트 동작만 확인하고 싶을 때 사용합니다
 
 small jobs 테스트 후 그래프 생성 확인용입니다.
 
-    cd /Users/jaechang/git/Heterogeneous-Transfer-Learning-code/brewing../updated
+    cd ~/R/Heterogeneous-Transfer-Learning
     Rscript plot.R results results/plots
 
 생성 파일:
