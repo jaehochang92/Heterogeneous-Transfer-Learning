@@ -13,6 +13,7 @@
 
 # Simulation logs and outputs
 Simulations-final/logs/
+Simulations-final/rlogs/
 Simulations-final/results/
 
 # Generated plots and documents
