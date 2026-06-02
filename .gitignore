@@ -16,6 +16,7 @@ Simulations-final/logs/
 Simulations-final/rlogs/
 Simulations-final/results/
 !Simulations-final/results/plots/
+!Simulations-final/results/plots/**
 
 # Generated plots and documents
 *.pdf
