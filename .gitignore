@@ -18,32 +18,6 @@ Simulations-final/results/*
 !Simulations-final/results/plots/
 !Simulations-final/results/plots/**
 
-# Generated plots and documents
-*.pdf
-*.eps
-*.png
-*.jpg
-*.jpeg
-*.tiff
-
-# Archives and binary blobs
-*.zip
-*.tar
-*.tar.gz
-*.tgz
-*.7z
-*.gz
-*.bz2
-*.xz
-
-# Common model/checkpoint outputs
-*.pt
-*.pth
-*.ckpt
-*.onnx
-*.h5
-*.hdf5
-
 # Local environments / caches
 .Rproj.user/
 .renv/
