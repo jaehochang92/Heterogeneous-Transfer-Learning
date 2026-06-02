@@ -10,7 +10,7 @@ library(dplyr)
 library(truncnorm)
 library(Sieve)
 
-setwd('~/git/Heterogeneous-Transfer-Learning-code/brewing../updated')
+# setwd('~/git/Heterogeneous-Transfer-Learning-code/Simulations-final')
 source("src/methods.r")
 source("src/dgp.r")
 source("src/mapping.R")
@@ -26,10 +26,11 @@ option_list <- list(
   make_option(c("--p2"), type = "integer", default = 20),
   make_option(c("--rep"), type = "integer", default = 10),
   make_option(c("--K_values"), type = "character", default = "2,4,8,16"),
-  make_option(c("--np_values"), type = "character", default = "200,400,800,1600"),
+  make_option(c("--np_values"), type = "character", default = "200,400,800"),
   make_option(c("--nt_values"), type = "character", default = "30,60,90"),
   make_option(c("--p1_values"), type = "character", default = "10, 20, 30"),
-  make_option(c("--p2_values"), type = "character", default = "10, 20, 30")
+  make_option(c("--p2_values"), type = "character", default = "10, 20, 30"),
+  make_option(c("--sweep_params"), type = "character", default = "K,np,nt,p1,p2")
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 
@@ -42,7 +43,7 @@ if (is.na(global_task_id)) {
   global_task_id <- 1L
 }
 
-log_dir <- "logs"
+log_dir <- "rlogs"
 if (!dir.exists(log_dir))
   dir.create(log_dir)
 log_path <- sprintf("%s/progress_task_%04d.log", log_dir, global_task_id)
@@ -53,7 +54,18 @@ log_message <- function(msg) {
       append = TRUE)
 }
 
+out_dir <- "results"
+if (!dir.exists(out_dir))
+  dir.create(out_dir)
+
 sweep_plan <- build_sweep_plan(opt)
+ sweep_params <- trimws(unlist(strsplit(opt$sweep_params, ",", fixed = TRUE)))
+ sweep_params <- sweep_params[nzchar(sweep_params)]
+ if (length(sweep_params) == 0L) {
+   stop("No sweep parameters selected. Provide --sweep_params with at least one of K,np,nt,p1,p2")
+ }
+ sweep_plan <- sweep_plan[sweep_param %in% sweep_params]
+ sweep_plan <- unique(sweep_plan)
 total_tasks <- nrow(sweep_plan)
 sweep_task_id <- ((global_task_id - 1L) %% total_tasks) + 1L
 if (sweep_task_id > total_tasks) {
@@ -134,7 +146,7 @@ for (i in seq_len(opt$rep)) {
       )
       if (row_idx %% 2L == 0L || row_idx == total_steps) {
         partial_dt <- rbindlist(result_list[seq_len(row_idx)], fill = TRUE)
-        partial_path <- sprintf("results/sim_res_task_%04d.partial.rds", global_task_id)
+        partial_path <- sprintf("%s/sim_res_task_%04d.partial.rds", out_dir, global_task_id)
         saveRDS(partial_dt, partial_path)
       }
       row_idx <- row_idx + 1L
@@ -143,10 +155,6 @@ for (i in seq_len(opt$rep)) {
 }
 
 final_dt <- rbindlist(result_list, fill = TRUE, ignore.attr = TRUE)
-
-out_dir <- "results"
-if (!dir.exists(out_dir))
-  dir.create(out_dir)
 
 save_path <- sprintf("%s/sim_res_task_%04d.rds", out_dir, global_task_id)
 saveRDS(final_dt, save_path)

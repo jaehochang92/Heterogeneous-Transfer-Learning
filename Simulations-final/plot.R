@@ -27,6 +27,7 @@ build_sweep_key_levels <- function(dt) {
 }
 
 summarize_plot_values <- function(long_dt) {
+  summary_dt <- long_dt[, Value := log(Value + 1)]
   summary_dt <- long_dt[, .(
     Mean = mean(Value, na.rm = TRUE),
     SD = sd(Value, na.rm = TRUE),
@@ -93,13 +94,13 @@ plot_metric <- function(plot_dt, metric_name, sweep_param = NULL) {
            group = Method
          )) +
     geom_errorbar(
-      aes(ymin = Mean - SE, ymax = Mean + SE),
+      aes(ymin = Mean - 2 * SE, ymax = Mean + 2 * SE),
       width = 0.15,
       alpha = 0.45,
       linewidth = 0.5
     ) +
-    geom_line(linewidth = 0.7, alpha = 0.9) +
-    geom_point(size = 2, alpha = 0.9) +
+    geom_line(linewidth = 1, alpha = 0.9) +
+    geom_point(size = 4, alpha = 0.9) +
     facet_grid(
       rows = vars(FMap),
       cols = vars(Sp),
@@ -112,7 +113,7 @@ plot_metric <- function(plot_dt, metric_name, sweep_param = NULL) {
     ) +
     labs(
       x = if (is.null(sweep_param)) "Swept Value" else sweep_param,
-      y = sprintf("Mean %s", metric_name),
+      y = sprintf("Mean log(%s)", metric_name),
       color = "Method",
       title = if (is.null(sweep_param)) {
         sprintf("%s", metric_name)
@@ -120,7 +121,7 @@ plot_metric <- function(plot_dt, metric_name, sweep_param = NULL) {
         sprintf("%s for sweep %s", metric_name, sweep_param)
       }
     ) +
-    theme_bw(base_size = 11) +
+    theme_bw(base_size = 18) +
     theme(
       strip.background = element_rect(fill = "grey95", color = "grey80"),
       axis.text.x = element_text(angle = 30, hjust = 1)
@@ -156,14 +157,14 @@ run_plot_pipeline <- function(results_dir = "results",
       file.path(out_dir, sprintf("summary_est_%s.png", sp_name)),
       p_est,
       width = 12,
-      height = 6,
+      height = 8,
       dpi = 300
     )
     ggsave(
       file.path(out_dir, sprintf("summary_pe_%s.png", sp_name)),
       p_pe,
       width = 12,
-      height = 6,
+      height = 8,
       dpi = 300
     )
   }
