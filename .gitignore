@@ -14,7 +14,7 @@
 # Simulation logs and outputs
 Simulations-final/logs/
 Simulations-final/rlogs/
-Simulations-final/results/
+Simulations-final/results/*
 !Simulations-final/results/plots/
 !Simulations-final/results/plots/**
 
