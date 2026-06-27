@@ -4,20 +4,28 @@ parse_int_list <- function(x) {
   as.integer(vals)
 }
 
+parse_dbl_list <- function(x) {
+  vals <- trimws(unlist(strsplit(x, ",", fixed = TRUE)))
+  vals <- vals[nzchar(vals)]
+  as.double(vals)
+}
+
 build_sweep_plan <- function(opt) {
-  fixed_cfg <- list(K = opt$K,
+  fixed_cfg <- list(h = opt$h,
+                    K = opt$K,
                     np = opt$np,
                     nt = opt$nt,
                     p1 = opt$p1,
                     p2 = opt$p2)
   sweep_values <- list(
+    h = parse_dbl_list(opt$h_values),
     K = parse_int_list(opt$K_values),
     np = parse_int_list(opt$np_values),
     nt = parse_int_list(opt$nt_values),
     p1 = parse_int_list(opt$p1_values),
     p2 = parse_int_list(opt$p2_values)
   )
-  sweep_order <- c("K", "np", "nt", "p1", "p2")
+  sweep_order <- c('h', "K", "np", "nt", "p1", "p2")
   rows <- vector("list", 0L)
   idx <- 1L
   for (param in sweep_order) {
@@ -27,6 +35,7 @@ build_sweep_plan <- function(opt) {
       cfg[[param]] <- v
       rows[[idx]] <- data.table(
         sweep_param = param,
+        h = as.double(cfg$h),
         K = as.integer(cfg$K),
         np = as.integer(cfg$np),
         nt = as.integer(cfg$nt),
@@ -41,7 +50,10 @@ build_sweep_plan <- function(opt) {
 
 # Primitive Functions for non-linear feature map --------------------------
 
-.calc_rmse <- function(y_trth, y_prd) sqrt(mean((y_trth - y_prd)^2))
+.calc_rmse <- function(y_trth, y_prd) {
+  if(length(y_trth) != length(y_prd)) print(mget(ls()))
+  sqrt(mean((y_trth - y_prd)^2))
+}
 
 .index_spliter <- function(array, n_folds = 5) {
   len <- length(array)

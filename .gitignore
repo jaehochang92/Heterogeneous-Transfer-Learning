@@ -13,10 +13,14 @@
 
 # Simulation logs and outputs
 Simulations-final/logs/
+Simulations-final/logs_sand/
 Simulations-final/rlogs/
 Simulations-final/results/*
+Simulations-final/results_sand/*
 !Simulations-final/results/plots/
 !Simulations-final/results/plots/**
+!Simulations-final/results_sand/plots/
+!Simulations-final/results_sand/plots/**
 
 # Local environments / caches
 .Rproj.user/

@@ -1,8 +1,14 @@
+library(dplyr)
 library(data.table)
 library(ggplot2)
 
+log_info <- function(msg) {
+  cat(sprintf("[%s] %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), msg))
+}
+
 resolve_sweep_value <- function(dt) {
   result <- as.character(dt$dgp_fmap)
+  result[dt$SweepParam == "h"] <- as.character(dt$h[dt$SweepParam == "h"])
   result[dt$SweepParam == "K"] <- as.character(dt$K[dt$SweepParam == "K"])
   result[dt$SweepParam == "np"] <- as.character(dt$np[dt$SweepParam == "np"])
   result[dt$SweepParam == "nt"] <- as.character(dt$nt[dt$SweepParam == "nt"])
@@ -27,48 +33,36 @@ build_sweep_key_levels <- function(dt) {
 }
 
 summarize_plot_values <- function(long_dt) {
-  long_dt <- copy(long_dt)[, Value := log(Value + 1e-12)]
+  long_dt <- copy(long_dt)
+  long_dt[Metric %in% c("Est", "PE") & Value > 0, Value := log(Value)]
+  # long_dt[Metric %in% c("Est", "PE") & Value <= 0, Value := NA]
+  
   summary_dt <- long_dt[, .(
     Mean = mean(Value, na.rm = TRUE),
-    LQ = quantile(Value, .25, na.rm = T),
-    UQ = quantile(Value, .75, na.rm = T),
-    N = sum(!is.na(Value))
+    LQ   = quantile(Value, 0.25, na.rm = TRUE),
+    UQ   = quantile(Value, 0.75, na.rm = TRUE),
+    N    = sum(!is.na(Value))
   ), by = .(Metric, Method, Sp, FMap, SweepParam, SweepValue, SweepKey)]
-  summary_dt
+  
+  return(summary_dt)
 }
 
-load_simulation_results <- function(results_dir = "results") {
-  task_files <- list.files(results_dir,
-                           pattern = "^sim_res_task_[0-9]{4}[.]rds$",
-                           full.names = TRUE,
-                           recursive = TRUE)
-  bundle_files <- list.files(results_dir,
-                             pattern = "^sim_res_bundle_.*[.]rds$",
-                             full.names = TRUE,
-                             recursive = TRUE)
-
-  # Defensive: ignore partial checkpoints.
-  task_files <- task_files[!grepl("\\.partial\\.rds$", task_files)]
-  bundle_files <- bundle_files[!grepl("\\.partial\\.rds$", bundle_files)]
-
-  if (length(bundle_files) == 0L) {
-    files <- task_files
-  } else {
-    # Prefer bundle outputs when present in a directory, but still include
-    # task outputs from directories that have no bundles.
-    bundle_dirs <- unique(dirname(bundle_files))
-    task_files_kept <- task_files[!dirname(task_files) %in% bundle_dirs]
-    files <- c(bundle_files, task_files_kept)
+load_simulation_results <- function(results_dir = "results_sand") {
+  batch_dir <- file.path(results_dir, "batch_bundles")
+  if (!dir.exists(batch_dir)) {
+    stop(sprintf("ERROR: dir '%s' does not exist.", batch_dir))
   }
-  files <- sort(unique(files))
-
-  if (length(files) == 0) {
-    stop(sprintf("No result files found in '%s'.", results_dir))
+  
+  files <- list.files(batch_dir, pattern = "^sand_res_(bundle|batch)_.*[.]rds$", full.names = TRUE)
+  files <- files[!grepl("\\.partial\\.rds$", files)]
+  
+  if (length(files) == 0L) {
+    stop(sprintf("ERROR: dir '%s' has no *.rds files.", batch_dir))
   }
-
-  rbindlist(lapply(files, readRDS),
-            fill = TRUE,
-            use.names = TRUE)
+  
+  log_info(sprintf("Aggregating %d batch data files...", length(files)))
+  
+  rbindlist(lapply(files, readRDS), fill = TRUE, use.names = TRUE)
 }
 
 add_sweep_columns <- function(dt) {
@@ -80,27 +74,27 @@ add_sweep_columns <- function(dt) {
 }
 
 build_plot_table <- function(dt) {
-  metric_cols <- grep("^(Est|PE)_", names(dt), value = TRUE)
+  metric_cols <- names(dt)[grepl("^(Est|PE)_|Precision|Recall|F1|ExactMatch|FalsePos|FalseNeg|N_selected", names(dt))]
   if (length(metric_cols) == 0) {
     stop("No Est_/PE_ columns found in results.")
   }
-
+  
   if (!("dgp_fmap" %in% names(dt))) {
     stop("Column 'dgp_fmap' is required to split plots by fmap.")
   }
-  
   long_dt <- melt(
     dt,
     id.vars = c("Sp", "dgp_fmap", "SweepParam", "SweepValue", "SweepKey"),
     measure.vars = metric_cols,
     variable.name = "MetricMethod",
-    value.name = "Value",
-    variable.factor = FALSE
+    value.name = "Value"
   )
+  
   long_dt[, Metric := sub("_.*", "", MetricMethod)]
   long_dt[, Method := sub("^[^_]+_", "", MetricMethod)]
-  long_dt[, FMap := as.character(dgp_fmap)]
+  long_dt[is.na(Method), Method := "SAND"]
   
+  long_dt[, FMap := as.character(dgp_fmap)]
   summarize_plot_values(long_dt)
 }
 
@@ -108,6 +102,9 @@ plot_metric <- function(plot_dt, metric_name, sweep_param = NULL, fmap_val = NUL
   metric_dt <- plot_dt[plot_dt$Metric == metric_name]
   if (!is.null(sweep_param)) {
     metric_dt <- metric_dt[metric_dt$SweepParam == sweep_param]
+  }
+  if (is.factor(metric_dt$SweepKey)) {
+    metric_dt[, SweepKey := droplevels(SweepKey)]
   }
   if (!is.null(fmap_val)) {
     metric_dt <- metric_dt[FMap == fmap_val]
@@ -123,16 +120,16 @@ plot_metric <- function(plot_dt, metric_name, sweep_param = NULL, fmap_val = NUL
            y = Mean,
            color = Method,
            shape = Method,
-           group = Method
+           group = interaction(Method, Sp)
          )) +
-    geom_errorbar(
+         geom_errorbar(
       aes(ymin = LQ, ymax = UQ),
       width = 0.1,
-      alpha = 0.65,
+      alpha = 0.35,
       linewidth = 0.5
     ) +
-    geom_line(linewidth = 1, alpha = 0.9) +
-    geom_point(size = 4, alpha = 0.9) +
+    geom_line(linewidth = 1, alpha = 0.5) +
+    geom_point(size = 4, alpha = 0.5) +
     facet_grid(
       cols = vars(Sp),
       scales = "free_y",
@@ -150,11 +147,13 @@ plot_metric <- function(plot_dt, metric_name, sweep_param = NULL, fmap_val = NUL
       title = if (is.null(sweep_param)) {
         sprintf("%s", metric_name)
       } else {
-        sprintf("%s for growing %s", ifelse(metric_name == 'Est', 
-        'Estimation Errors (EE)', 'Prediction Errors (PE)'), sweep_param)
+        sprintf("%s for growing %s", ifelse(
+          metric_name == 'Est', 
+          'Estimation Errors (EE)', 'Prediction Errors (PE)'), 
+          sweep_param)
       }
     ) +
-    theme_bw(base_size = 20) +
+    theme_minimal(base_size = 30) +
     theme(
       strip.background = element_rect(fill = "grey95", color = "grey80"),
       axis.text.x = element_text(angle = 30, hjust = 1),
@@ -162,52 +161,84 @@ plot_metric <- function(plot_dt, metric_name, sweep_param = NULL, fmap_val = NUL
     )
 }
 
-run_plot_pipeline <- function(results_dir = "results",
-                              out_dir = "results/plots") {
+plot_selection_metrics <- function(plot_dt, sweep_param = NULL, fmap_val = NULL) {
+  sel_dt <- plot_dt[Metric %in% c("Precision", "Recall", "F1", "ExactMatch", "FalsePos")]
+  
+  if (!is.null(sweep_param)) sel_dt <- sel_dt[SweepParam == sweep_param]
+  if (is.factor(sel_dt$SweepKey)) {
+    sel_dt[, SweepKey := droplevels(SweepKey)]
+  }
+  if (!is.null(fmap_val)) sel_dt <- sel_dt[FMap == fmap_val]
+  
+  ggplot(sel_dt, aes(x = SweepKey, y = Mean, color = Metric, group = Metric)) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 3) +
+    facet_grid(Metric ~ Sp, scales = "free_y", labeller = label_parsed) +
+    labs(
+      x = ifelse(is.null(sweep_param), "Swept Value", sweep_param),
+      y = "Performance Score",
+      title = "Source Selection Accuracy"
+    ) +
+    theme_minimal(base_size = 30) +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1), legend.position = "none")
+}
+
+run_plot_pipeline <- function(results_dir = "results_sand", 
+                              out_dir = "results_sand/plots",
+                              exclude = NULL) {
   if (!dir.exists(out_dir)) {
     dir.create(out_dir, recursive = TRUE)
   }
-
+  
   raw_dt <- load_simulation_results(results_dir)
   raw_dt <- add_sweep_columns(raw_dt)
-  plot_dt <- build_plot_table(raw_dt)
+  if (!is.null(exclude)) {
+    plot_dt <- raw_dt %>% dplyr::select(!contains(exclude)) %>% build_plot_table
+  } else plot_dt <- raw_dt %>% build_plot_table
   plot_dt[Sp == "sp", Sp := "sparse~delta"]
   plot_dt[Sp == "nsp", Sp := "dense~delta"]
-
+  
   sweep_params <- unique(as.character(plot_dt$SweepParam))
   fmap_cases <- unique(as.character(plot_dt$FMap))
   est_plots <- vector("list", length(sweep_params))
   pe_plots <- vector("list", length(sweep_params))
   names(est_plots) <- sweep_params
   names(pe_plots) <- sweep_params
-
+  
   for (sp_name in sweep_params) {
     for (fmap_val in fmap_cases) {
       plot_key <- paste(sp_name, fmap_val, sep = "_")
       
-      p_est <- plot_metric(plot_dt, "Est", sweep_param = sp_name, fmap_val = fmap_val)
-      p_pe <- plot_metric(plot_dt, "PE", sweep_param = sp_name, fmap_val = fmap_val)
-
+      p_est <- plot_metric(plot_dt, "Est", sweep_param = sp_name, 
+                           fmap_val = fmap_val)
+      p_pe <- plot_metric(plot_dt, "PE", sweep_param = sp_name, 
+                          fmap_val = fmap_val)
+      
       est_plots[[plot_key]] <- p_est
       pe_plots[[plot_key]] <- p_pe
       
       ggsave(
-        file.path(out_dir, sprintf("ee_%s_%s.png", sp_name, fmap_val)),
+        file.path(out_dir, sprintf("ee_%s_%s.pdf", sp_name, fmap_val)),
         p_est,
-        width = 10,
-        height = 7,
+        width = 12,
+        height = 8,
         dpi = 300
       )
       ggsave(
-        file.path(out_dir, sprintf("pe_%s_%s.png", sp_name, fmap_val)),
+        file.path(out_dir, sprintf("pe_%s_%s.pdf", sp_name, fmap_val)),
         p_pe,
-        width = 10,
-        height = 7,
+        width = 12,
+        height = 8,
         dpi = 300
+      )
+      p_sel <- plot_selection_metrics(plot_dt, sweep_param = sp_name, fmap_val = fmap_val)
+      ggsave(
+        file.path(out_dir, sprintf("sel_%s_%s.pdf", sp_name, fmap_val)),
+        p_sel, width = 12, height = 10, dpi = 300
       )
     }
   }
-
+  
   list(
     est_plots = est_plots,
     pe_plots = pe_plots,
@@ -216,7 +247,8 @@ run_plot_pipeline <- function(results_dir = "results",
 }
 
 args <- commandArgs(trailingOnly = TRUE)
-results_dir <- if (length(args) >= 1) args[[1]] else "results"
+results_dir <- if (length(args) >= 1) args[[1]] else "results_sand"
 out_dir <- if (length(args) >= 2) args[[2]] else file.path(results_dir, "plots")
 
-res <- run_plot_pipeline(results_dir = results_dir, out_dir = out_dir)
+res <- run_plot_pipeline(results_dir = results_dir, out_dir = out_dir, 
+                         exclude = c('OracleHmTL'))

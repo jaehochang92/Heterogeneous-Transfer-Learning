@@ -1,12 +1,12 @@
 htl.target <- function(p_coefs, X, Y, Z = NULL) {
   if (is.null(Z)) {
-    D <- X
+    Dt <- X
   } else {
-    D <- cbind(X, Z)
+    Dt <- cbind(X, Z)
   }
-  D <- as.matrix(D)
-  p_coefs <- p_coefs[1:(ncol(D) + 1)]
-  cv.glmnet(D, Y, alpha = 1, offset = cbind(1, D) %*% p_coefs)
+  Dt <- as.matrix(Dt)
+  p_coefs <- p_coefs[1:(ncol(Dt) + 1)]
+  cv.glmnet(Dt, Y, alpha = 1, offset = cbind(1, Dt) %*% p_coefs)
 }
 
 agg.proxy <- function(proxy_list, fmap = c('none', 'linear', 'nlinear')) {
@@ -14,22 +14,20 @@ agg.proxy <- function(proxy_list, fmap = c('none', 'linear', 'nlinear')) {
   K <- length(proxy_list)
   proxy_fits <- lapply(proxy_list, function(proxyk) {
     if (fmap == 'none') {
-      # D <- proxyk$D$X
-      D <- cbind(proxyk$D$X, proxyk$D$Z)
+      D <- proxyk$D$X
+      proxy_fit <- lm(proxyk$Y ~ D)
+      list(p_coefs = coef(proxy_fit), h_Θ = matrix(0, 2, 2))
     } else {
       D <- cbind(proxyk$D$X, proxyk$D$Z)
+      proxy_fit <- lm(proxyk$Y ~ D)
+      h_Θ <- cv.fmap(proxyk$D$X, proxyk$D$Z, h = fmap)
+      list(p_coefs = coef(proxy_fit), h_Θ = h_Θ)
     }
-    proxy_fit <- lm(proxyk$Y ~ D)
-    h_Θ <- cv.fmap(proxyk$D$X, proxyk$D$Z, h = fmap)
-    list(p_coefs = coef(proxy_fit), h_Θ = h_Θ)
   })
+  proxy_h_Θs <- lapply(proxy_fits, `[[`, "h_Θ")
+  proxy_h_Θ_avg <- sum_padded_sparse_matrices(proxy_h_Θs) / K
   proxy_coefs_mat <- lapply(proxy_fits, `[[`, "p_coefs") %>% do.call(cbind, .)
   proxy_coef_avg <- rowMeans(as.matrix(proxy_coefs_mat)) 
-  proxy_h_Θ_avg <- NULL
-  if (fmap != 'none') {
-    proxy_h_Θs <- lapply(proxy_fits, `[[`, "h_Θ")
-    proxy_h_Θ_avg <- sum_padded_sparse_matrices(proxy_h_Θs) / K
-  }
   list(p_coefs = proxy_coef_avg, h_Θ = proxy_h_Θ_avg, fmap_type = fmap)
 }
 
@@ -59,11 +57,11 @@ htl.eval <- function(proxy_fit, target, test, beta_true) {
   return(list(est_err = est_err, pe = pe, coef = trgt_coef))
 }
 
-vanilla.lasso <- function(target, test, beta_true) {
-  lasso_fit <- cv.glmnet(as.matrix(target$X), target$Y, alpha = 1)
-  lasso_coef <- as.vector(coef(lasso_fit, s = 'lambda.min'))
+vanilla.glmnet <- function(target, test, beta_true, alp) {
+  lasso_fit <- cv.glmnet(as.matrix(target$X), target$Y, alpha = alp)
+  lasso_coef <- as.vector(coef(lasso_fit, s = 'lambda.1se'))
   est_err <- .calc_rmse(lasso_coef[-1], beta_true[1:(length(lasso_coef) - 1)])
-  h_y_test <- cbind(1, test$X) %*% lasso_coef
+  h_y_test <- predict(lasso_fit, test$X, s = 'lambda.1se')
   pe <- .calc_rmse(h_y_test, test$Y)
   return(list(est_err = est_err, pe = pe))
 }
@@ -78,7 +76,7 @@ sim.runner <- function(seedno = 1, K = 1, np = 500, nt = 30, ntest = 100,
   beta_t <- D_data$βt
   proxy_list <- D_data$proxydata[[sp]]
   
-  res_lasso  <- vanilla.lasso(target, test, beta_t)
+  res_lasso  <- vanilla.glmnet(target, test, beta_t, 1)
   
   proxy_fit_nl <- agg.proxy(proxy_list, 'nlinear')
   res_htl_nl <- htl.eval(proxy_fit_nl, target, test, beta_t)
@@ -98,7 +96,7 @@ sim.runner <- function(seedno = 1, K = 1, np = 500, nt = 30, ntest = 100,
               HmTL = res_hmtl$pe, 
               HTL.LN = res_htl_ln$pe, 
               HTL.NL = res_htl_nl$pe,
-              Oracle = .calc_rmse(D_data$testdata$εtest, 0))
+              Oracle = sqrt(mean(D_data$testdata$εtest^2)))
   
   return(list(Est_Error = est_err_vec, Prediction_Error = pe_vec))
 }

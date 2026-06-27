@@ -7,13 +7,13 @@ SEED_BASE=1992
 FIXED_K=1
 FIXED_NP=400
 FIXED_NT=30
-FIXED_P1=30
-FIXED_P2=30
+FIXED_P1=50
+FIXED_P2=50
 K_VALUES="2,4,8,16"
 NP_VALUES="200,400,800,1600"
 NT_VALUES="30,60,120,240"
-P1_VALUES="30,50,100,200"
-P2_VALUES="10,20,30"
+P1_VALUES="50,100,200,400"
+P2_VALUES="50,100,200,400"
 
 REPEATS_PER_SWEEP=200
 MAX_ARRAY_SIZE=990
@@ -143,11 +143,28 @@ compute_totals() {
   TOTAL_JOBS=$(( TOTAL_SWEEPS * REPEATS_PER_SWEEP ))
 }
 
+clean_selected_sweep_dirs() {
+  local results_root="$SCRIPT_DIR/results"
+  local rlogs_root="$SCRIPT_DIR/rlogs"
+  local sweep
+
+  IFS=',' read -r -a selected_sweeps <<< "$SWEEP_PARAMS_CSV"
+  for sweep in "${selected_sweeps[@]}"; do
+    sweep="${sweep//[[:space:]]/}"
+    [[ -z "$sweep" ]] && continue
+    rm -rf "$results_root/$sweep" "$rlogs_root/$sweep"
+  done
+}
+
 run_worker() {
   if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
     echo "SLURM_ARRAY_TASK_ID is required in worker mode."
     exit 1
   fi
+
+  # Bundle multiple global tasks run by this worker into a single result file.
+  local bundle_id="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-job}}_${SLURM_ARRAY_TASK_ID}"
+  export SIM_BUNDLE_ID="$bundle_id"
 
   local local_task_id="$SLURM_ARRAY_TASK_ID"
   local submitted_tasks="${SUBMITTED_TASKS:-1}"
@@ -211,13 +228,11 @@ submit_single_array() {
   echo "Total jobs: ${TOTAL_JOBS}"
   echo "Submitted array tasks: ${submitted_tasks}"
 
-  local output_file="$LOG_DIR/%x_%A_%a.out"
-  local error_file="$LOG_DIR/%x_%A_%a.err"
+  local output_file="$LOG_DIR/%x_%A_%a.log"
 
   local -a sbatch_args=(
     --job-name="htl_sim"
     --output="$output_file"
-    --error="$error_file"
     --time="$TIME"
     --ntasks=1
     --cpus-per-task="$CPUS_PER_TASK"
@@ -239,6 +254,7 @@ parse_args "$@"
 
 if [[ "$MODE" == "submit" ]]; then
   compute_totals
+  clean_selected_sweep_dirs
 fi
 
 if [[ "$MODE" == "worker" ]]; then
